@@ -32,9 +32,9 @@ Depends:
  python-keystoneclient (>= 1:0.2),
  python-prettytable (<< 0.8),
  python-prettytable (>= 0.5),
+ python-pkg-resources,
  ${misc:Depends},
  ${python:Depends}
-Provides: ${python:Provides}
 Description: client library and CLI for OpenStack Heat
  Heat is a service to orchestrate multiple composite cloud applications
  using templates, through both an OpenStack-native ReST API and
