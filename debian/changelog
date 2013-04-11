@@ -1,0 +1,5 @@
+python-heatclient (0.2.2-1) experimental; urgency=low
+
+  * Initial release. (Closes: #705231)
+
+ -- Prach Pongpanich <prachpub@gmail.com>  Thu, 11 Apr 2013 12:03:51 +0700
