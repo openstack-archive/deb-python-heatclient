@@ -6,17 +6,18 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
            Prach Pongpanich <prachpub@gmail.com>
 Build-Depends: 
  debhelper (>= 9),
- openstack-pkg-tools,
  python-all (>= 2.6.6-3~)
 Build-Depends-Indep: 
- python-argparse,
+ openstack-pkg-tools,
+ python-argparse (>= 1.2.1-2~),
  python-httplib2,
  python-iso8601,
  python-keystoneclient (>= 1:0.2),
  python-prettytable (<< 0.8),
  python-prettytable (>= 0.5),
  python-setuptools (>= 0.6.24),
- python-setuptools-git
+ python-nose,
+ python-mox
 Standards-Version: 3.9.4
 Homepage: https://github.com/openstack/python-heatclient
 Vcs-Git: git://git.debian.org/openstack/python-heatclient.git
@@ -26,7 +27,7 @@ Package: python-heatclient
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
 Depends: 
- python-argparse,
+ python (>= 2.7) | python-argparse,
  python-httplib2,
  python-iso8601,
  python-keystoneclient (>= 1:0.2),

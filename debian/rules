@@ -2,13 +2,10 @@
 
 #export DH_VERBOSE=1
 
-MANIFEST_EXCLUDE_STANDARD := heatclient
-
 include /usr/share/openstack-pkg-tools/pkgos.make
 
 %:
 	dh $@  --with python2
-
 
 override_dh_auto_configure:
 	echo $(VERSION) > heatclient/versioninfo
@@ -23,7 +20,7 @@ override_dh_install:
 	dh_install
 	rm -rf $(CURDIR)/debian/python-heatclient/usr/heatclient
 
-#override_dh_auto_test:
-#ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
-#	set -e ; for pyversion in $(shell pyversions -r); do $$pyversion setup.py test; done
-#endif
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	set -e ; for pyversion in $(shell pyversions -vr); do nosetests-$$pyversion -v; done
+endif
