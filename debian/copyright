@@ -3,7 +3,8 @@ Upstream-Name: python-heatclient
 Source: https://github.com/openstack/python-heatclient
 
 Files: debian/*
-Copyright: 2012 Prach Pongpanich <prachpub@gmail.com>
+Copyright: (c) 2012-2013, Prach Pongpanich <prachpub@gmail.com>
+	(c) 2013, Thomas Goirand <zigo@debian.org>
 License: Apache-2
 
 Files: *
