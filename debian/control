@@ -11,7 +11,7 @@ Build-Depends:
  python-all (>= 2.6.6-3~)
 Build-Depends-Indep: 
  openstack-pkg-tools,
- python-argparse,
+ python-argparse (>= 1.2),
  python-httplib2,
  python-iso8601,
  python-keystoneclient (>= 1:0.2),
