@@ -6,21 +6,18 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
            Prach Pongpanich <prachpub@gmail.com>,
            Julien Danjou <acid@debian.org>,
            Ghe Rivero <ghe.rivero@stackops.com>
-Build-Depends: 
- debhelper (>= 9),
- python-all (>= 2.6.6-3~)
-Build-Depends-Indep: 
- openstack-pkg-tools,
- python-argparse (>= 1.2),
- python-httplib2,
- python-iso8601,
- python-keystoneclient (>= 1:0.2),
- python-prettytable (<< 0.8),
- python-prettytable (>= 0.5),
- python-setuptools (>= 0.6.24),
- python-setuptools-git,
- python-nose,
- python-mox
+Build-Depends: debhelper (>= 9), python-all (>= 2.6.6-3~)
+Build-Depends-Indep: openstack-pkg-tools,
+                     python-argparse (>= 1.2),
+                     python-httplib2,
+                     python-iso8601,
+                     python-keystoneclient (>= 1:0.2),
+                     python-mox,
+                     python-nose,
+                     python-prettytable (<< 0.8),
+                     python-prettytable (>= 0.5),
+                     python-setuptools (>= 0.6.24),
+                     python-setuptools-git
 Standards-Version: 3.9.4
 Homepage: https://github.com/openstack/python-heatclient
 Vcs-Git: git://git.debian.org/openstack/python-heatclient.git
@@ -29,16 +26,15 @@ Vcs-Browser: http://git.debian.org/?p=openstack/python-heatclient.git
 Package: python-heatclient
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: 
- python (>= 2.7) | python-argparse,
- python-httplib2,
- python-iso8601,
- python-keystoneclient (>= 1:0.2),
- python-prettytable (<< 0.8),
- python-prettytable (>= 0.5),
- python-pkg-resources,
- ${misc:Depends},
- ${python:Depends}
+Depends: python (>= 2.7) | python-argparse,
+         python-httplib2,
+         python-iso8601,
+         python-keystoneclient (>= 1:0.2),
+         python-pkg-resources,
+         python-prettytable (<< 0.8),
+         python-prettytable (>= 0.5),
+         ${misc:Depends},
+         ${python:Depends}
 Description: client library and CLI for OpenStack Heat
  Heat is a service to orchestrate multiple composite cloud applications
  using templates, through both an OpenStack-native ReST API and

@@ -2,6 +2,7 @@ python-heatclient (0.2.2-2) UNRELEASED; urgency=low
 
   * Added missing dependency python-setuptools-git (Closes: #710576), thanks to
     Jeremy Bicha for reporting.
+  * Ran wrap-and-sort.
 
  -- Thomas Goirand <zigo@debian.org>  Sat, 01 Jun 2013 09:23:44 +0800
 
