@@ -18,6 +18,7 @@ Build-Depends-Indep:
  python-prettytable (<< 0.8),
  python-prettytable (>= 0.5),
  python-setuptools (>= 0.6.24),
+ python-setuptools-git,
  python-nose,
  python-mox
 Standards-Version: 3.9.4
