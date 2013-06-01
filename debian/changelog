@@ -1,4 +1,4 @@
-python-heatclient (0.2.2-2) UNRELEASED; urgency=low
+python-heatclient (0.2.2-2) unstable; urgency=low
 
   * Added missing dependency python-setuptools-git (Closes: #710576), thanks to
     Jeremy Bicha for reporting.
