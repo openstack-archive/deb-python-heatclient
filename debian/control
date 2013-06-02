@@ -7,7 +7,8 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
            Julien Danjou <acid@debian.org>,
            Ghe Rivero <ghe.rivero@stackops.com>
 Build-Depends: debhelper (>= 9), python-all (>= 2.6.6-3~)
-Build-Depends-Indep: openstack-pkg-tools,
+Build-Depends-Indep: lsb-release,
+                     openstack-pkg-tools,
                      python-httplib2,
                      python-iso8601,
                      python-keystoneclient (>= 1:0.2),
@@ -33,7 +34,8 @@ Depends: python (>= 2.7),
          python-prettytable (<< 0.8),
          python-prettytable (>= 0.5),
          ${misc:Depends},
-         ${python:Depends}
+         ${python:Depends},
+         ${wheezy-added-deps}
 Description: client library and CLI for OpenStack Heat
  Heat is a service to orchestrate multiple composite cloud applications
  using templates, through both an OpenStack-native ReST API and
