@@ -1,6 +1,13 @@
 python-heatclient (0.2.2-3) unstable; urgency=low
 
+  [ Prach Pongpanich ]
   * Drop dependency on python-argparse (Closes: #710718)
+
+  [ Thomas Goirand ]
+  * Make the drop of the python-argparse conditional (eg: it don't drop the
+    dependency if building in Wheezy).
+  * Allow the unit tests to fail if running in Wheezy (because of the lack of
+    the python-argparse build-depends).
 
  -- Prach Pongpanich <prachpub@gmail.com>  Sun, 02 Jun 2013 07:01:12 +0700
 
