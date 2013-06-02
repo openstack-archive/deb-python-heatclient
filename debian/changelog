@@ -1,3 +1,9 @@
+python-heatclient (0.2.2-3) unstable; urgency=low
+
+  * Drop dependency on python-argparse (Closes: #710718)
+
+ -- Prach Pongpanich <prachpub@gmail.com>  Sun, 02 Jun 2013 07:01:12 +0700
+
 python-heatclient (0.2.2-2) unstable; urgency=low
 
   * Added missing dependency python-setuptools-git (Closes: #710576), thanks to
