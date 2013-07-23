@@ -1,11 +1,8 @@
 include AUTHORS
 include LICENSE
-include README.md
+include README.rst
 include ChangeLog
 include tox.ini
-include heatclient/versioninfo
+include .testr.conf
 recursive-include doc *
-recursive-include tests *
 recursive-include tools *
-exclude .gitignore
-exclude .gitreview

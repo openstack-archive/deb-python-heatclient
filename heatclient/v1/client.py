@@ -14,6 +14,7 @@
 #    under the License.
 
 from heatclient.common import http
+from heatclient.v1 import actions
 from heatclient.v1 import events
 from heatclient.v1 import resources
 from heatclient.v1 import stacks
@@ -30,8 +31,9 @@ class Client(http.HTTPClient):
     """
 
     def __init__(self, *args, **kwargs):
-        """ Initialize a new client for the Heat v1 API. """
+        """Initialize a new client for the Heat v1 API."""
         super(Client, self).__init__(*args, **kwargs)
         self.stacks = stacks.StackManager(self)
         self.resources = resources.ResourceManager(self)
         self.events = events.EventManager(self)
+        self.actions = actions.ActionManager(self)

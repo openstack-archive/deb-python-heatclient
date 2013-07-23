@@ -18,7 +18,6 @@ import httplib
 import logging
 import os
 import socket
-import StringIO
 import urlparse
 
 try:
@@ -80,7 +79,7 @@ class HTTPClient(object):
     def get_connection(self):
         _class = self.connection_params[0]
         try:
-            return _class(*self.connection_params[1],
+            return _class(*self.connection_params[1][0:2],
                           **self.connection_params[2])
         except httplib.InvalidURL:
             raise exc.InvalidEndpoint()
@@ -122,7 +121,7 @@ class HTTPClient(object):
         LOG.debug('\n'.join(dump))
 
     def _http_request(self, url, method, **kwargs):
-        """ Send an http request with the specified characteristics.
+        """Send an http request with the specified characteristics.
 
         Wrapper around httplib.HTTP(S)Connection.request to handle tasks such
         as setting headers and error handling.
@@ -134,10 +133,6 @@ class HTTPClient(object):
             kwargs['headers'].setdefault('X-Auth-Token', self.auth_token)
         if self.auth_url:
             kwargs['headers'].setdefault('X-Auth-Url', self.auth_url)
-        if self.username:
-            kwargs['headers'].setdefault('X-Auth-User', self.username)
-        if self.password:
-            kwargs['headers'].setdefault('X-Auth-Key', self.password)
 
         self.log_curl_request(method, url, kwargs)
         conn = self.get_connection()
@@ -164,7 +159,7 @@ class HTTPClient(object):
         elif resp.status in (301, 302, 305):
             # Redirected. Reissue the request to the new location.
             location = resp.getheader('location', None)
-            if location == None:
+            if location is None:
                 message = "Location not returned with 302"
                 raise exc.InvalidEndpoint(message=message)
             elif location.startswith(self.endpoint):
@@ -178,6 +173,12 @@ class HTTPClient(object):
             raise exc.from_response(resp, body_str)
 
         return resp, body_str
+
+    def credentials_headers(self):
+        return {
+            'X-Auth-User': self.username,
+            'X-Auth-Key': self.password
+        }
 
     def json_request(self, method, url, **kwargs):
         kwargs.setdefault('headers', {})
@@ -228,8 +229,7 @@ class VerifiedHTTPSConnection(httplib.HTTPSConnection):
         self.insecure = insecure
 
     def connect(self):
-        """
-        Connect to a host on a given (SSL) port.
+        """Connect to a host on a given (SSL) port.
         If ca_file is pointing somewhere, use it to check Server Certificate.
 
         Redefined/copied and extended from httplib.py:1105 (Python 2.6.x).
@@ -257,7 +257,7 @@ class VerifiedHTTPSConnection(httplib.HTTPSConnection):
 
     @staticmethod
     def get_system_ca_file():
-        """"Return path to system default CA file"""
+        """Return path to system default CA file."""
         # Standard CA file locations for Debian/Ubuntu, RedHat/Fedora,
         # Suse, FreeBSD/OpenBSD
         ca_path = ['/etc/ssl/certs/ca-certificates.crt',

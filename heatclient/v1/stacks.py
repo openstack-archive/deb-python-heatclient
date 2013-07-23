@@ -16,7 +16,6 @@
 import urllib
 
 from heatclient.common import base
-import heatclient.exc as exc
 
 DEFAULT_PAGE_SIZE = 20
 
@@ -82,15 +81,17 @@ class StackManager(base.Manager):
         return paginate(params)
 
     def create(self, **kwargs):
-        """Create a stack"""
-        resp, body = self.api.json_request(
-                'POST', '/stacks', body=kwargs)
+        """Create a stack."""
+        headers = self.api.credentials_headers()
+        resp, body = self.api.json_request('POST', '/stacks',
+                                           body=kwargs, headers=headers)
 
     def update(self, **kwargs):
-        """Update a stack"""
+        """Update a stack."""
         stack_id = kwargs.pop('stack_id')
-        resp, body = self.api.json_request(
-                'PUT', '/stacks/%s' % stack_id, body=kwargs)
+        headers = self.api.credentials_headers()
+        resp, body = self.api.json_request('PUT', '/stacks/%s' % stack_id,
+                                           body=kwargs, headers=headers)
 
     def delete(self, stack_id):
         """Delete a stack."""
@@ -115,9 +116,8 @@ class StackManager(base.Manager):
         return body
 
     def validate(self, **kwargs):
-        """Validate a stack template"""
-        resp, body = self.api.json_request(
-                'POST', '/validate', body=kwargs)
+        """Validate a stack template."""
+        resp, body = self.api.json_request('POST', '/validate', body=kwargs)
         return body
 
 
@@ -129,6 +129,6 @@ class StackChildManager(base.Manager):
         if stack_id.find('/') > 0:
             return stack_id
         resp, body = self.api.json_request('GET',
-                '/stacks/%s' % stack_id)
+                                           '/stacks/%s' % stack_id)
         stack = body['stack']
         return '%s/%s' % (stack['stack_name'], stack['id'])

@@ -13,13 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import errno
-import hashlib
+import json
 import os
+import prettytable
 import sys
+import textwrap
 import uuid
 
-import prettytable
 
 from heatclient import exc
 from heatclient.openstack.common import importutils
@@ -35,13 +35,26 @@ def arg(*args, **kwargs):
     return _decorator
 
 
-def pretty_choice_list(l):
-    return ', '.join("'%s'" % i for i in l)
+def link_formatter(links):
+    return '\n'.join([l.get('href', '') for l in links or []])
+
+
+def json_formatter(js):
+    return json.dumps(js, indent=2)
+
+
+def text_wrap_formatter(d):
+    return '\n'.join(textwrap.wrap(d or '', 55))
+
+
+def newline_list_formatter(r):
+    return '\n'.join(r or [])
 
 
 def print_list(objs, fields, field_labels=None, formatters={}, sortby=0):
     field_labels = field_labels or fields
-    pt = prettytable.PrettyTable([f for f in field_labels], caching=False)
+    pt = prettytable.PrettyTable([f for f in field_labels],
+                                 caching=False, print_empty=False)
     pt.align = 'l'
 
     for o in objs:
@@ -57,7 +70,8 @@ def print_list(objs, fields, field_labels=None, formatters={}, sortby=0):
 
 
 def print_dict(d, formatters={}):
-    pt = prettytable.PrettyTable(['Property', 'Value'], caching=False)
+    pt = prettytable.PrettyTable(['Property', 'Value'],
+                                 caching=False, print_empty=False)
     pt.align = 'l'
 
     for field in d.keys():
@@ -124,12 +138,16 @@ def exit(msg=''):
 
 
 def format_parameters(params):
-    '''
-    Reformat parameters into dict of format expected by the API
-    '''
+    '''Reformat parameters into dict of format expected by the API.'''
     parameters = {}
     if params:
         for count, p in enumerate(params.split(';'), 1):
-            (n, v) = p.split('=')
+            try:
+                (n, v) = p.split(('='), 1)
+            except ValueError:
+                msg = '%s(%s). %s.' % ('Malformed parameter', p,
+                                       'Use the key=value format')
+                raise exc.CommandError(msg)
+
             parameters[n] = v
     return parameters
