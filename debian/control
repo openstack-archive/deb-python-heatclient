@@ -24,9 +24,9 @@ Build-Depends-Indep: lsb-release,
                      python-yaml,
                      testrepository (>= 0.0.14)
 Standards-Version: 3.9.4
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-heatclient.git
+Vcs-Git: git://anonscm.debian.org/openstack/python-heatclient.git
 Homepage: https://github.com/openstack/python-heatclient
-Vcs-Git: git://git.debian.org/openstack/python-heatclient.git
-Vcs-Browser: http://git.debian.org/?p=openstack/python-heatclient.git
 
 Package: python-heatclient
 Architecture: all
