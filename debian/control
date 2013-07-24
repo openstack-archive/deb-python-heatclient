@@ -20,7 +20,7 @@ Build-Depends-Indep: lsb-release,
                      python-setuptools (>= 0.6.24),
                      python-setuptools-git,
                      python-testtools,
-                     python-testscenarios (>= 0.3),
+                     python-testscenarios,
                      python-yaml,
                      testrepository (>= 0.0.14)
 Standards-Version: 3.9.4
