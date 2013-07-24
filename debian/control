@@ -6,9 +6,9 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
            Prach Pongpanich <prachpub@gmail.com>,
            Julien Danjou <acid@debian.org>,
            Ghe Rivero <ghe.rivero@stackops.com>
-Build-Depends: debhelper (>= 9), python-all (>= 2.6.6-3~)
+Build-Depends: debhelper (>= 9), python-all (>= 2.6.6-3~), openstack-pkg-tools
 Build-Depends-Indep: lsb-release,
-                     openstack-pkg-tools,
+                     python-fixtures,
                      python-httplib2,
                      python-iso8601,
                      python-keystoneclient (>= 1:0.2),
