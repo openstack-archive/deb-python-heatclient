@@ -21,7 +21,8 @@ Build-Depends-Indep: lsb-release,
                      python-setuptools-git,
                      python-testtools,
                      python-testscenarios (>= 0.3),
-                     python-yaml
+                     python-yaml,
+                     testrepository (>= 0.0.17)
 Standards-Version: 3.9.4
 Homepage: https://github.com/openstack/python-heatclient
 Vcs-Git: git://git.debian.org/openstack/python-heatclient.git

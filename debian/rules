@@ -24,13 +24,7 @@ override_dh_install:
 
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	set -e; for pyversion in $(shell pyversions -r); do \
-		if [ `lsb_release -a | grep Release | awk '{print $$2}'` = "7.0" ] ; then \
-			$$pyversion /usr/bin/nosetests -v || true ; \
-		else \
-			$$pyversion /usr/bin/nosetests -v; \
-		fi \
-	done
+	python setup.py testr --slowest
 endif
 
 override_dh_gencontrol:
