@@ -5,6 +5,7 @@ python-heatclient (0.2.3-1) UNRELEASED; urgency=low
   * VCS fields now using canonical URLs.
   * Added build-depends: python-mimeparse (>= 0.1.4), python-testscenarios,
     python-yaml and testrepository.
+  * Dropped build-depends: python-nose.
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 24 Jul 2013 16:03:22 +0800
 
