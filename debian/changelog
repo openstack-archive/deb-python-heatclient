@@ -1,4 +1,4 @@
-python-heatclient (0.2.3-1) UNRELEASED; urgency=low
+python-heatclient (0.2.3-1) unstable; urgency=low
 
   * New upstream release.
   * Added export OSLO_PACKAGE_VERSION=$(VERSION) in debian/rules.
