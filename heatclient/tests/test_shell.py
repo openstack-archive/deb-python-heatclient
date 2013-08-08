@@ -1,3 +1,16 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import cStringIO
 import httplib2
 import os
@@ -153,7 +166,7 @@ class ShellValidationTest(TestCase):
         self.m.StubOutWithMock(v1client.Client, 'json_request')
         fakes.script_keystone_client()
         v1client.Client.json_request(
-            'GET', '/stacks?limit=20').AndRaise(exc.Unauthorized)
+            'GET', '/stacks?').AndRaise(exc.Unauthorized)
 
         self.m.ReplayAll()
         fake_env = {
@@ -272,6 +285,108 @@ class ShellTest(TestCase):
         for r in required:
             self.assertRegexpMatches(list_text, r)
 
+    def test_parsable_error(self):
+        message = "The Stack (bad) could not be found."
+        resp_dict = {
+            "explanation": "The resource could not be found.",
+            "code": 404,
+            "error": {
+                "message": message,
+                "type": "StackNotFound",
+                "traceback": "",
+            },
+            "title": "Not Found"
+        }
+
+        fakes.script_keystone_client()
+        fakes.script_heat_error(json.dumps(resp_dict))
+
+        self.m.ReplayAll()
+
+        try:
+            self.shell("stack-show bad")
+        except exc.HTTPException as e:
+            self.assertEqual(str(e), "ERROR: " + message)
+
+    def test_parsable_verbose(self):
+        message = "The Stack (bad) could not be found."
+        resp_dict = {
+            "explanation": "The resource could not be found.",
+            "code": 404,
+            "error": {
+                "message": message,
+                "type": "StackNotFound",
+                "traceback": "<TRACEBACK>",
+            },
+            "title": "Not Found"
+        }
+
+        fakes.script_keystone_client()
+        fakes.script_heat_error(json.dumps(resp_dict))
+
+        self.m.ReplayAll()
+
+        try:
+            exc.verbose = 1
+            self.shell("stack-show bad")
+        except exc.HTTPException as e:
+            expect = 'ERROR: The Stack (bad) could not be found.\n<TRACEBACK>'
+            self.assertEqual(str(e), expect)
+
+    def test_parsable_malformed_error(self):
+        invalid_json = "ERROR: {Invalid JSON Error."
+        fakes.script_keystone_client()
+        fakes.script_heat_error(invalid_json)
+        self.m.ReplayAll()
+
+        try:
+            self.shell("stack-show bad")
+        except exc.HTTPException as e:
+            self.assertEqual(str(e), "ERROR: " + invalid_json)
+
+    def test_parsable_malformed_error_missing_message(self):
+        missing_message = {
+            "explanation": "The resource could not be found.",
+            "code": 404,
+            "error": {
+                "type": "StackNotFound",
+                "traceback": "",
+            },
+            "title": "Not Found"
+        }
+
+        fakes.script_keystone_client()
+        fakes.script_heat_error(json.dumps(missing_message))
+        self.m.ReplayAll()
+
+        try:
+            self.shell("stack-show bad")
+        except exc.HTTPException as e:
+            self.assertEqual(str(e), "ERROR: Internal Error")
+
+    def test_parsable_malformed_error_missing_traceback(self):
+        message = "The Stack (bad) could not be found."
+        resp_dict = {
+            "explanation": "The resource could not be found.",
+            "code": 404,
+            "error": {
+                "message": message,
+                "type": "StackNotFound",
+            },
+            "title": "Not Found"
+        }
+
+        fakes.script_keystone_client()
+        fakes.script_heat_error(json.dumps(resp_dict))
+        self.m.ReplayAll()
+
+        try:
+            exc.verbose = 1
+            self.shell("stack-show bad")
+        except exc.HTTPException as e:
+            self.assertEqual(str(e),
+                             "ERROR: The Stack (bad) could not be found.\n")
+
     def test_describe(self):
         fakes.script_keystone_client()
         resp_dict = {"stack": {
@@ -303,6 +418,59 @@ class ShellTest(TestCase):
         ]
         for r in required:
             self.assertRegexpMatches(list_text, r)
+
+    def test_template_show_cfn(self):
+        fakes.script_keystone_client()
+        template_data = open(os.path.join(TEST_VAR_DIR,
+                                          'minimal.template')).read()
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            template_data)
+        resp_dict = json.loads(template_data)
+        v1client.Client.json_request(
+            'GET', '/stacks/teststack/template').AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+
+        show_text = self.shell('template-show teststack')
+        required = [
+            '{',
+            '  "AWSTemplateFormatVersion": "2010-09-09",',
+            '  "Outputs": {},',
+            '  "Resources": {},',
+            '  "Parameters": {}',
+            '}'
+        ]
+        for r in required:
+            self.assertRegexpMatches(show_text, r)
+
+    def test_template_show_hot(self):
+        fakes.script_keystone_client()
+        resp_dict = {"heat_template_version": "2013-05-23",
+                     "parameters": {},
+                     "resources": {},
+                     "outputs": {}}
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            json.dumps(resp_dict))
+        v1client.Client.json_request(
+            'GET', '/stacks/teststack/template').AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+
+        show_text = self.shell('template-show teststack')
+        required = [
+            "heat_template_version: '2013-05-23'",
+            "outputs: {}",
+            "parameters: {}",
+            "resources: {}"
+        ]
+        for r in required:
+            self.assertRegexpMatches(show_text, r)
 
     def test_create(self):
         fakes.script_keystone_client()

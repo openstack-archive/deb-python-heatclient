@@ -17,8 +17,6 @@ import urllib
 
 from heatclient.common import base
 
-DEFAULT_PAGE_SIZE = 20
-
 
 class Stack(base.Resource):
     def __repr__(self):
@@ -28,10 +26,29 @@ class Stack(base.Resource):
         self.manager.update(self, **fields)
 
     def delete(self):
-        return self.manager.delete(self)
+        return self.manager.delete(self.id)
 
-    def data(self, **kwargs):
-        return self.manager.data(self, **kwargs)
+    def get(self):
+        # set_loaded() first ... so if we have to bail, we know we tried.
+        self.set_loaded(True)
+        if not hasattr(self.manager, 'get'):
+            return
+
+        new = self.manager.get('%s/%s' % (self.stack_name, self.id))
+        if new:
+            self._add_details(new._info)
+
+    @property
+    def action(self):
+        s = self.stack_status
+        # Return everything before the first underscore
+        return s[:s.index('_')]
+
+    @property
+    def status(self):
+        s = self.stack_status
+        # Return everything after the first underscore
+        return s[s.index('_') + 1:]
 
 
 class StackManager(base.Manager):
@@ -64,10 +81,12 @@ class StackManager(base.Manager):
             if (page_size and len(stacks) == page_size and
                     (absolute_limit is None or 0 < seen < absolute_limit)):
                 qp['marker'] = stack.id
-                for image in paginate(qp, seen):
-                    yield image
+                for stack in paginate(qp, seen):
+                    yield stack
 
-        params = {'limit': kwargs.get('page_size', DEFAULT_PAGE_SIZE)}
+        params = {}
+        if 'page_size' in kwargs:
+            params['limit'] = kwargs['page_size']
 
         if 'marker' in kwargs:
             params['marker'] = kwargs['marker']

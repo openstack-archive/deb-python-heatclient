@@ -169,7 +169,7 @@ class HeatShell(object):
         parser.add_argument('-t', '--token-only',
                             default=bool(False),
                             action='store_true',
-                            help='DEPRECATED! Has no effect')
+                            help=argparse.SUPPRESS)
 
         return parser
 
@@ -236,11 +236,16 @@ class HeatShell(object):
 
             httplib2.debuglevel = 1
 
+    def _setup_verbose(self, verbose):
+        if verbose:
+            exc.verbose = 1
+
     def main(self, argv):
         # Parse args once to find version
         parser = self.get_base_parser()
         (options, args) = parser.parse_known_args(argv)
         self._setup_debugging(options.debug)
+        self._setup_verbose(options.verbose)
 
         # build available subcommands based on version
         api_version = options.heat_api_version
@@ -278,6 +283,11 @@ class HeatShell(object):
             raise exc.CommandError("You must provide an auth url via"
                                    " either --os-auth-url or via "
                                    "env[OS_AUTH_URL]")
+        if args.os_no_client_auth and not args.heat_url:
+            raise exc.CommandError("If you specify --os-no-client-auth"
+                                   " you must also specify a Heat API URL "
+                                   "via either --heat-url or "
+                                   "env[HEAT_URL]")
         kwargs = {
             'username': args.os_username,
             'password': args.os_password,

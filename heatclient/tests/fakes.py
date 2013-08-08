@@ -1,5 +1,19 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import json
 
+from heatclient import exc
 from heatclient.v1 import client as v1client
 from keystoneclient.v2_0 import client as ksclient
 
@@ -31,8 +45,35 @@ def script_heat_list():
                             {'content-type': 'application/json'},
                             json.dumps(resp_dict))
     v1client.Client.json_request('GET',
-                                 '/stacks?limit=20').AndReturn((resp,
-                                                                resp_dict))
+                                 '/stacks?').AndReturn((resp, resp_dict))
+
+
+def script_heat_normal_error():
+    resp_dict = {
+        "explanation": "The resource could not be found.",
+        "code": 404,
+        "error": {
+            "message": "The Stack (bad) could not be found.",
+            "type": "StackNotFound",
+            "traceback": "",
+        },
+        "title": "Not Found"
+    }
+    resp = FakeHTTPResponse(400,
+                            'The resource could not be found',
+                            {'content-type': 'application/json'},
+                            json.dumps(resp_dict))
+    v1client.Client.json_request('GET', '/stacks/bad').AndRaise(
+        exc.from_response(resp, json.dumps(resp_dict)))
+
+
+def script_heat_error(resp_string):
+    resp = FakeHTTPResponse(400,
+                            'The resource could not be found',
+                            {'content-type': 'application/json'},
+                            resp_string)
+    v1client.Client.json_request('GET', '/stacks/bad').AndRaise(
+        exc.from_response(resp, resp_string))
 
 
 def fake_headers():

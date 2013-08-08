@@ -1,3 +1,16 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import mox
 import testtools
 
@@ -35,6 +48,56 @@ class HttpClientTest(testtools.TestCase):
         resp, body = client.raw_request('GET', '')
         self.assertEqual(resp.status, 200)
         self.assertEqual(''.join([x for x in body]), '')
+        self.m.VerifyAll()
+
+    def test_token_or_credentials(self):
+        # Record a 200
+        fake200 = fakes.FakeHTTPResponse(
+            200, 'OK',
+            {'content-type': 'application/octet-stream'},
+            '')
+
+        # no token or credentials
+        mock_conn = http.httplib.HTTPConnection('example.com', 8004,
+                                                timeout=600.0)
+        mock_conn.request('GET', '/',
+                          headers={'Content-Type': 'application/octet-stream',
+                                   'User-Agent': 'python-heatclient'})
+        mock_conn.getresponse().AndReturn(fake200)
+
+        # credentials
+        mock_conn = http.httplib.HTTPConnection('example.com', 8004,
+                                                timeout=600.0)
+        mock_conn.request('GET', '/',
+                          headers={'Content-Type': 'application/octet-stream',
+                                   'User-Agent': 'python-heatclient',
+                                   'X-Auth-Key': 'pass',
+                                   'X-Auth-User': 'user'})
+        mock_conn.getresponse().AndReturn(fake200)
+
+        # token suppresses credentials
+        mock_conn = http.httplib.HTTPConnection('example.com', 8004,
+                                                timeout=600.0)
+        mock_conn.request('GET', '/',
+                          headers={'Content-Type': 'application/octet-stream',
+                                   'User-Agent': 'python-heatclient',
+                                   'X-Auth-Token': 'abcd1234'})
+        mock_conn.getresponse().AndReturn(fake200)
+
+        # Replay, create client, assert
+        self.m.ReplayAll()
+        client = http.HTTPClient('http://example.com:8004')
+        resp, body = client.raw_request('GET', '')
+        self.assertEqual(resp.status, 200)
+
+        client.username = 'user'
+        client.password = 'pass'
+        resp, body = client.raw_request('GET', '')
+        self.assertEqual(resp.status, 200)
+
+        client.auth_token = 'abcd1234'
+        resp, body = client.raw_request('GET', '')
+        self.assertEqual(resp.status, 200)
         self.m.VerifyAll()
 
     def test_http_json_request(self):
