@@ -1,3 +1,10 @@
+python-heatclient (0.2.4-1) UNRELEASED; urgency=low
+
+  [ Prach Pongpanich ]
+  * New upstream release.
+
+ -- Prach Pongpanich <prachpub@gmail.com>  Thu, 08 Aug 2013 22:12:38 +0700
+
 python-heatclient (0.2.3-1) unstable; urgency=low
 
   [ Thomas Goirand ]
