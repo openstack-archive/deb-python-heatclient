@@ -21,7 +21,9 @@ Build-Depends-Indep: lsb-release,
                      python-testtools,
                      python-testscenarios,
                      python-yaml,
-                     testrepository (>= 0.0.14)
+                     testrepository (>= 0.0.14),
+                     python-mock (>= 0.8.0),
+                     python-pbr (>= 0.5.20)
 Standards-Version: 3.9.4
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-heatclient.git
 Vcs-Git: git://anonscm.debian.org/openstack/python-heatclient.git
