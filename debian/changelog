@@ -4,7 +4,7 @@ python-heatclient (0.2.4-1) unstable; urgency=low
   * Add build-depends on python-mock (>= 0.8.0), python-pbr (>= 0.5.20) and
     python-d2to1 (>= 0.2.11) (Closes: #724174).
 
- -- Prach Pongpanich <prachpub@gmail.com>  Thu, 08 Aug 2013 22:12:38 +0700
+ -- Thomas Goirand <zigo@debian.org>  Mon, 23 Sep 2013 02:21:28 +0000
 
 python-heatclient (0.2.3-1) unstable; urgency=low
 
