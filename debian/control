@@ -6,24 +6,27 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
            Prach Pongpanich <prachpub@gmail.com>,
            Julien Danjou <acid@debian.org>,
            Ghe Rivero <ghe.rivero@stackops.com>
-Build-Depends: debhelper (>= 9), python-all (>= 2.6.6-3~), openstack-pkg-tools
+Build-Depends: debhelper (>= 9),
+               openstack-pkg-tools,
+               python-all (>= 2.6.6-3~),
+               python-d2to1 (>= 0.2.11)
 Build-Depends-Indep: lsb-release,
                      python-fixtures,
                      python-httplib2,
                      python-iso8601,
                      python-keystoneclient (>= 1:0.2),
                      python-mimeparse (>= 0.1.4),
+                     python-mock (>= 0.8.0),
                      python-mox,
+                     python-pbr (>= 0.5.20),
                      python-prettytable (<< 0.8),
                      python-prettytable (>= 0.5),
                      python-setuptools (>= 0.6.24),
                      python-setuptools-git,
-                     python-testtools,
                      python-testscenarios,
+                     python-testtools,
                      python-yaml,
-                     testrepository (>= 0.0.14),
-                     python-mock (>= 0.8.0),
-                     python-pbr (>= 0.5.20)
+                     testrepository (>= 0.0.14)
 Standards-Version: 3.9.4
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-heatclient.git
 Vcs-Git: git://anonscm.debian.org/openstack/python-heatclient.git
