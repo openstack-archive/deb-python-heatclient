@@ -1,3 +1,9 @@
+python-heatclient (0.2.4-2) UNRELEASED; urgency=low
+
+  * Added --testr-args='--subunit  ' when calling testr.
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 01 Oct 2013 14:46:19 +0800
+
 python-heatclient (0.2.4-1) unstable; urgency=low
 
   * New upstream release.
