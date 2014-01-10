@@ -556,6 +556,10 @@ class ShellTestUserPass(ShellBase):
             'Created',
             {'location': 'http://no.where/v1/tenant_id/stacks/teststack2/2'},
             None)
+        self.m.StubOutWithMock(urlutils, 'urlopen')
+        urlutils.urlopen('http://no.where/minimal.template').AndReturn(
+            six.StringIO('{}'))
+
         http.HTTPClient.json_request(
             'POST', '/stacks', body=mox.IgnoreArg(),
             headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
@@ -920,7 +924,7 @@ class ShellTestStandaloneToken(ShellTestUserPass):
         pass
 
     def test_bad_template_file(self):
-        failed_msg = 'Cannot parse template file:'
+        failed_msg = 'Error parsing template '
 
         with tempfile.NamedTemporaryFile() as bad_json_file:
             bad_json_file.write("{foo:}")
