@@ -9,8 +9,8 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
 Build-Depends: debhelper (>= 9),
                openstack-pkg-tools,
                python-all (>= 2.6.6-3~),
-               python-setuptools,
-               python-pbr (>= 0.6)
+               python-pbr (>= 0.6),
+               python-setuptools
 Build-Depends-Indep: lsb-release,
                      python-coverage (>= 3.6),
                      python-fixtures (>= 0.3.14),
@@ -26,6 +26,7 @@ Build-Depends-Indep: lsb-release,
                      python-testscenarios (>= 0.4),
                      python-testtools (>= 0.9.34),
                      python-yaml,
+                     subunit (>= 0.0.18),
                      testrepository (>= 0.0.18)
 Standards-Version: 3.9.4
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-heatclient.git
