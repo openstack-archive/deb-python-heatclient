@@ -9,16 +9,15 @@ Uploaders: Thomas Goirand <zigo@debian.org>,
 Build-Depends: debhelper (>= 9),
                openstack-pkg-tools,
                python-all (>= 2.6.6-3~),
-               python-d2to1 (>= 0.2.10)
+               python-setuptools,
+               python-pbr (>= 6)
 Build-Depends-Indep: lsb-release,
                      python-fixtures,
-                     python-httplib2,
                      python-iso8601,
                      python-keystoneclient (>= 1:0.2),
                      python-mimeparse (>= 0.1.4),
                      python-mock (>= 0.8.0),
                      python-mox,
-                     python-pbr (>= 0.5.20),
                      python-prettytable (<< 0.8),
                      python-prettytable (>= 0.5),
                      python-setuptools (>= 0.6.24),
@@ -35,10 +34,9 @@ Homepage: https://github.com/openstack/python-heatclient
 Package: python-heatclient
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: python (>= 2.7),
-         python-httplib2,
-         python-iso8601,
+Depends: python-iso8601,
          python-keystoneclient (>= 1:0.2),
+         python-pbr (>= 0.6),
          python-pkg-resources,
          python-prettytable (<< 0.8),
          python-prettytable (>= 0.5),
