@@ -1,6 +1,7 @@
 python-heatclient (0.2.9-1) UNRELEASED; urgency=low
 
   * New upstream release.
+  * Review (build-)depends for this release.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 15 Apr 2014 16:13:27 +0800
 
