@@ -13,24 +13,29 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import base64
 import os
 import six
+from six.moves.urllib import error
+from six.moves.urllib import parse
+from six.moves.urllib import request
 
 from heatclient.common import environment_format
 from heatclient.common import template_format
 from heatclient import exc
-from heatclient.openstack.common.py3kcompat import urlutils
+from heatclient.openstack.common import jsonutils
 
 
 def get_template_contents(template_file=None, template_url=None,
-                          template_object=None, object_request=None):
+                          template_object=None, object_request=None,
+                          files=None):
 
     # Transform a bare file path to a file:// URL.
     if template_file:
         template_url = normalise_file_path_to_url(template_file)
 
     if template_url:
-        tpl = urlutils.urlopen(template_url).read()
+        tpl = request.urlopen(template_url).read()
 
     elif template_object:
         template_url = template_object
@@ -53,9 +58,11 @@ def get_template_contents(template_file=None, template_url=None,
         raise exc.CommandError(
             'Error parsing template %s %s' % (template_url, e))
 
-    files = {}
     tmpl_base_url = base_url_for_url(template_url)
+    if files is None:
+        files = {}
     resolve_template_get_files(template, files, tmpl_base_url)
+    resolve_template_type(template, files, tmpl_base_url)
     return files, template
 
 
@@ -74,8 +81,26 @@ def resolve_template_get_files(template, files, template_base_url):
                       ignore_if, recurse_if)
 
 
+def resolve_template_type(template, files, template_base_url):
+
+    def ignore_if(key, value):
+        if key != 'type':
+            return True
+        if not isinstance(value, six.string_types):
+            return True
+        if not value.endswith(('.yaml', '.template')):
+            return True
+        return False
+
+    def recurse_if(value):
+        return isinstance(value, (dict, list))
+
+    get_file_contents(template, files, template_base_url,
+                      ignore_if, recurse_if, file_is_template=True)
+
+
 def get_file_contents(from_data, files, base_url=None,
-                      ignore_if=None, recurse_if=None):
+                      ignore_if=None, recurse_if=None, file_is_template=False):
 
     if recurse_if and recurse_if(from_data):
         if isinstance(from_data, dict):
@@ -83,7 +108,8 @@ def get_file_contents(from_data, files, base_url=None,
         else:
             recurse_data = from_data
         for value in recurse_data:
-            get_file_contents(value, files, base_url, ignore_if, recurse_if)
+            get_file_contents(value, files, base_url, ignore_if, recurse_if,
+                              file_is_template=file_is_template)
 
     if isinstance(from_data, dict):
         for key, value in iter(from_data.items()):
@@ -93,28 +119,44 @@ def get_file_contents(from_data, files, base_url=None,
             if base_url and not base_url.endswith('/'):
                 base_url = base_url + '/'
 
-            str_url = urlutils.urljoin(base_url, value)
-            try:
-                files[str_url] = urlutils.urlopen(str_url).read()
-            except urlutils.URLError:
-                raise exc.CommandError('Could not fetch contents for %s'
-                                       % str_url)
-
+            str_url = parse.urljoin(base_url, value)
+            if str_url not in files:
+                if file_is_template:
+                    template = get_template_contents(
+                        template_url=str_url, files=files)[1]
+                    file_content = jsonutils.dumps(template)
+                else:
+                    file_content = read_url_content(str_url)
+                files[str_url] = file_content
             # replace the data value with the normalised absolute URL
             from_data[key] = str_url
 
 
+def read_url_content(url):
+    try:
+        content = request.urlopen(url).read()
+    except error.URLError:
+        raise exc.CommandError('Could not fetch contents for %s'
+                               % url)
+    if content:
+        try:
+            content.decode('utf-8')
+        except ValueError:
+            content = base64.encodestring(content)
+    return content
+
+
 def base_url_for_url(url):
-    parsed = urlutils.urlparse(url)
+    parsed = parse.urlparse(url)
     parsed_dir = os.path.dirname(parsed.path)
-    return urlutils.urljoin(url, parsed_dir)
+    return parse.urljoin(url, parsed_dir)
 
 
 def normalise_file_path_to_url(path):
-    if urlutils.urlparse(path).scheme:
+    if parse.urlparse(path).scheme:
         return path
     path = os.path.abspath(path)
-    return urlutils.urljoin('file:', urlutils.pathname2url(path))
+    return parse.urljoin('file:', request.pathname2url(path))
 
 
 def process_environment_and_files(env_path=None, template=None,
@@ -125,7 +167,7 @@ def process_environment_and_files(env_path=None, template=None,
     if env_path:
         env_url = normalise_file_path_to_url(env_path)
         env_base_url = base_url_for_url(env_url)
-        raw_env = urlutils.urlopen(env_url).read()
+        raw_env = request.urlopen(env_url).read()
         env = environment_format.parse(raw_env)
 
         resolve_environment_urls(
@@ -153,8 +195,9 @@ def resolve_environment_urls(resource_registry, files, env_base_url):
             # don't need downloading.
             return True
 
-    get_file_contents(rr, files, base_url, ignore_if)
+    get_file_contents(rr, files, base_url, ignore_if, file_is_template=True)
 
     for res_name, res_dict in iter(rr.get('resources', {}).items()):
         res_base_url = res_dict.get('base_url', base_url)
-        get_file_contents(res_dict, files, res_base_url, ignore_if)
+        get_file_contents(
+            res_dict, files, res_base_url, ignore_if, file_is_template=True)

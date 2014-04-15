@@ -13,14 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import logging
+import six
+from six.moves.urllib import request
 import yaml
 
 from heatclient.common import template_utils
 from heatclient.common import utils
 from heatclient.openstack.common import jsonutils
-from heatclient.openstack.common.py3kcompat import urlutils
 
 import heatclient.exc as exc
+
+logger = logging.getLogger(__name__)
 
 
 @utils.arg('-f', '--template-file', metavar='<FILE>',
@@ -32,8 +36,12 @@ import heatclient.exc as exc
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g. from swift).')
 @utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
-           default=60, type=int,
-           help='Stack creation timeout in minutes. Default: 60.')
+           type=int,
+           help='Stack creation timeout in minutes.'
+                '  DEPRECATED use --timeout instead.')
+@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
+           type=int,
+           help='Stack creation timeout in minutes.')
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
            help='Enable rollback on create/update failure.')
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
@@ -45,6 +53,7 @@ import heatclient.exc as exc
            help='Name of the stack to create.')
 def do_create(hc, args):
     '''DEPRECATED! Use stack-create instead.'''
+    logger.warning('DEPRECATED! Use stack-create instead.')
     do_stack_create(hc, args)
 
 
@@ -57,8 +66,12 @@ def do_create(hc, args):
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g. from swift).')
 @utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
-           default=60, type=int,
-           help='Stack creation timeout in minutes. Default: 60.')
+           type=int,
+           help='Stack creation timeout in minutes.'
+                '  DEPRECATED use --timeout instead.')
+@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
+           type=int,
+           help='Stack creation timeout in minutes.')
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
            help='Enable rollback on create/update failure.')
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
@@ -78,15 +91,22 @@ def do_stack_create(hc, args):
     env_files, env = template_utils.process_environment_and_files(
         env_path=args.environment_file)
 
+    if args.create_timeout:
+        logger.warning('-c/--create-timeout is deprecated, '
+                       'please use -t/--timeout instead')
+
     fields = {
         'stack_name': args.name,
-        'timeout_mins': args.create_timeout,
         'disable_rollback': not(args.enable_rollback),
         'parameters': utils.format_parameters(args.parameters),
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
     }
+
+    timeout = args.timeout or args.create_timeout
+    if timeout:
+        fields['timeout_mins'] = timeout
 
     hc.stacks.create(**fields)
     do_stack_list(hc)
@@ -101,8 +121,12 @@ def do_stack_create(hc, args):
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g from swift).')
 @utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
-           default=60, type=int,
-           help='Stack creation timeout in minutes. Default: 60.')
+           type=int,
+           help='Stack creation timeout in minutes.'
+                '  DEPRECATED use --timeout instead.')
+@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
+           type=int,
+           help='Stack creation timeout in minutes.')
 @utils.arg('-a', '--adopt-file', metavar='<FILE or URL>',
            help='Path to adopt stack data file.')
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
@@ -128,11 +152,14 @@ def do_stack_adopt(hc, args):
         raise exc.CommandError('Need to specify --adopt-file')
 
     adopt_url = template_utils.normalise_file_path_to_url(args.adopt_file)
-    adopt_data = urlutils.urlopen(adopt_url).read()
+    adopt_data = request.urlopen(adopt_url).read()
+
+    if args.create_timeout:
+        logger.warning('-c/--create-timeout is deprecated, '
+                       'please use -t/--timeout instead')
 
     fields = {
         'stack_name': args.name,
-        'timeout_mins': args.create_timeout,
         'disable_rollback': not(args.enable_rollback),
         'adopt_stack_data': adopt_data,
         'parameters': utils.format_parameters(args.parameters),
@@ -141,14 +168,74 @@ def do_stack_adopt(hc, args):
         'environment': env
     }
 
+    timeout = args.timeout or args.create_timeout
+    if timeout:
+        fields['timeout_mins'] = timeout
+
     hc.stacks.create(**fields)
     do_stack_list(hc)
+
+
+@utils.arg('-f', '--template-file', metavar='<FILE>',
+           help='Path to the template.')
+@utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
+           help='Path to the environment.')
+@utils.arg('-u', '--template-url', metavar='<URL>',
+           help='URL of template.')
+@utils.arg('-o', '--template-object', metavar='<URL>',
+           help='URL to retrieve template object (e.g from swift)')
+@utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
+           default=60, type=int,
+           help='Stack timeout in minutes. Default: 60')
+@utils.arg('-r', '--enable-rollback', default=False, action="store_true",
+           help='Enable rollback on failure')
+@utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
+           help='Parameter values used to preview the stack. '
+           'This can be specified multiple times, or once with parameters '
+           'separated by semicolon.',
+           action='append')
+@utils.arg('name', metavar='<STACK_NAME>',
+           help='Name of the stack to preview.')
+def do_stack_preview(hc, args):
+    '''Preview the stack.'''
+    tpl_files, template = template_utils.get_template_contents(
+        args.template_file,
+        args.template_url,
+        args.template_object,
+        hc.http_client.raw_request)
+    env_files, env = template_utils.process_environment_and_files(
+        env_path=args.environment_file)
+
+    fields = {
+        'stack_name': args.name,
+        'disable_rollback': not(args.enable_rollback),
+        'parameters': utils.format_parameters(args.parameters),
+        'template': template,
+        'files': dict(list(tpl_files.items()) + list(env_files.items())),
+        'environment': env
+    }
+
+    if args.create_timeout:
+        fields['timeout_mins'] = args.create_timeout
+
+    stack = hc.stacks.preview(**fields)
+    formatters = {
+        'description': utils.text_wrap_formatter,
+        'template_description': utils.text_wrap_formatter,
+        'stack_status_reason': utils.text_wrap_formatter,
+        'parameters': utils.json_formatter,
+        'outputs': utils.json_formatter,
+        'resources': utils.json_formatter,
+        'links': utils.link_formatter,
+    }
+    utils.print_dict(stack.to_dict(), formatters=formatters)
 
 
 @utils.arg('id', metavar='<NAME or ID>', nargs='+',
            help='Name or ID of stack(s) to delete.')
 def do_delete(hc, args):
     '''DEPRECATED! Use stack-delete instead.'''
+    logger.warning('DEPRECATED! Use stack-delete instead.')
     do_stack_delete(hc, args)
 
 
@@ -213,6 +300,7 @@ def do_action_resume(hc, args):
            help='Name or ID of stack to describe.')
 def do_describe(hc, args):
     '''DEPRECATED! Use stack-show instead.'''
+    logger.warning('DEPRECATED! Use stack-show instead.')
     do_stack_show(hc, args)
 
 
@@ -254,6 +342,7 @@ def do_stack_show(hc, args):
            help='Name or ID of stack to update.')
 def do_update(hc, args):
     '''DEPRECATED! Use stack-update instead.'''
+    logger.warning('DEPRECATED! Use stack-update instead.')
     do_stack_update(hc, args)
 
 
@@ -265,6 +354,9 @@ def do_update(hc, args):
            help='URL of template.')
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g. from swift).')
+@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
+           type=int,
+           help='Stack update timeout in minutes.')
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help='Parameter values used to create the stack. '
            'This can be specified multiple times, or once with parameters '
@@ -292,12 +384,16 @@ def do_stack_update(hc, args):
         'environment': env
     }
 
+    if args.timeout:
+        fields['timeout_mins'] = args.timeout
+
     hc.stacks.update(**fields)
     do_stack_list(hc)
 
 
 def do_list(hc, args=None):
     '''DEPRECATED! Use stack-list instead.'''
+    logger.warning('DEPRECATED! Use stack-list instead.')
     do_stack_list(hc)
 
 
@@ -320,7 +416,7 @@ def do_stack_list(hc, args=None):
 
     stacks = hc.stacks.list(**kwargs)
     fields = ['id', 'stack_name', 'stack_status', 'creation_time']
-    utils.print_list(stacks, fields, sortby=3)
+    utils.print_list(stacks, fields, sortby_index=3)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -367,7 +463,7 @@ def do_resource_type_list(hc, args={}):
     '''List the available resource types.'''
     kwargs = {}
     types = hc.resource_types.list(**kwargs)
-    utils.print_list(types, ['resource_type'], sortby=0)
+    utils.print_list(types, ['resource_type'], sortby_index=0)
 
 
 @utils.arg('resource_type', metavar='<RESOURCE_TYPE>',
@@ -387,6 +483,7 @@ def do_resource_type_show(hc, args={}):
            help='Name or ID of stack to get the template for.')
 def do_gettemplate(hc, args):
     '''DEPRECATED! Use template-show instead.'''
+    logger.warning('DEPRECATED! Use template-show instead.')
     do_template_show(hc, args)
 
 
@@ -421,6 +518,7 @@ def do_template_show(hc, args):
            action='append')
 def do_validate(hc, args):
     '''DEPRECATED! Use template-validate instead.'''
+    logger.warning('DEPRECATED! Use template-validate instead.')
     do_template_validate(hc, args)
 
 
@@ -476,7 +574,7 @@ def do_resource_list(hc, args):
             else:
                 fields.insert(0, 'logical_resource_id')
 
-        utils.print_list(resources, fields, sortby=3)
+        utils.print_list(resources, fields, sortby_index=3)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -485,6 +583,7 @@ def do_resource_list(hc, args):
            help='Name of the resource to show the details for.')
 def do_resource(hc, args):
     '''DEPRECATED! Use resource-show instead.'''
+    logger.warning('DEPRECATED! Use resource-show instead.')
     do_resource_show(hc, args)
 
 
@@ -563,8 +662,10 @@ def do_resource_signal(hc, args):
         raise exc.CommandError('Can only specify one of data and data-file')
     if data_file:
         data_url = template_utils.normalise_file_path_to_url(data_file)
-        data = urlutils.urlopen(data_url).read()
+        data = request.urlopen(data_url).read()
     if data:
+        if isinstance(data, six.binary_type):
+            data = data.decode('utf-8')
         try:
             data = jsonutils.loads(data)
         except ValueError as ex:
@@ -612,6 +713,7 @@ def do_event_list(hc, args):
            help='ID of event to display details for.')
 def do_event(hc, args):
     '''DEPRECATED! Use event-show instead.'''
+    logger.warning('DEPRECATED! Use event-show instead.')
     do_event_show(hc, args)
 
 

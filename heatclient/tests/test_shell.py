@@ -14,6 +14,8 @@
 import os
 import re
 import six
+from six.moves.urllib import parse
+from six.moves.urllib import request
 import sys
 
 import fixtures
@@ -22,7 +24,6 @@ import testscenarios
 import testtools
 
 from heatclient.openstack.common import jsonutils
-from heatclient.openstack.common.py3kcompat import urlutils
 from heatclient.openstack.common import strutils
 from mox3 import mox
 
@@ -244,6 +245,7 @@ class ShellBase(TestCase):
             sys.stdout = six.StringIO()
             _shell = heatclient.shell.HeatShell()
             _shell.main(argstr.split())
+            self.subcommands = _shell.subcommands.keys()
         except SystemExit:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             self.assertEqual(0, exc_value.code)
@@ -272,6 +274,18 @@ class ShellTestCommon(ShellBase):
             help_text = self.shell(argstr)
             for r in required:
                 self.assertRegexpMatches(help_text, r)
+
+    def test_command_help(self):
+        output = self.shell('help help')
+        self.assertIn('usage: heat help [<subcommand>]', output)
+        subcommands = list(self.subcommands)
+        for command in subcommands:
+            if command.replace('_', '-') == 'bash-completion':
+                continue
+            output1 = self.shell('help %s' % command)
+            output2 = self.shell('%s --help' % command)
+            self.assertEqual(output1, output2)
+            self.assertRegexpMatches(output1, '^usage: heat %s' % command)
 
     def test_debug_switch_raises_error(self):
         fakes.script_keystone_client()
@@ -379,9 +393,11 @@ class ShellTestUserPass(ShellBase):
 
     def test_stack_list_with_args(self):
         self._script_keystone_client()
-        expected_url = ('/stacks?'
-                        'status=COMPLETE&status=FAILED'
-                        '&marker=fake_id&limit=2')
+        expected_url = '/stacks?%s' % parse.urlencode({
+            'limit': 2,
+            'status': ['COMPLETE', 'FAILED'],
+            'marker': 'fake_id',
+        }, True)
         fakes.script_heat_list(expected_url)
 
         self.m.ReplayAll()
@@ -663,6 +679,46 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(show_text, r)
 
+    def test_stack_preview(self):
+        self._script_keystone_client()
+        resp_dict = {"stack": {
+            "id": "1",
+            "stack_name": "teststack",
+            "stack_status": 'CREATE_COMPLETE',
+            "resources": {'1': {'name': 'r1'}},
+            "creation_time": "2012-10-25T01:58:47Z",
+        }}
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'location': 'http://no.where/v1/tenant_id/stacks/teststack2/2'},
+            jsonutils.dumps(resp_dict))
+        http.HTTPClient.json_request(
+            'POST', '/stacks/preview', data=mox.IgnoreArg(),
+            headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
+        ).AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        preview_text = self.shell(
+            'stack-preview teststack '
+            '--template-file=%s '
+            '--parameters="InstanceType=m1.large;DBUsername=wp;'
+            'DBPassword=verybadpassword;KeyName=heat_key;'
+            'LinuxDistribution=F17"' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack',
+            '1',
+            'resources'
+        ]
+
+        for r in required:
+            self.assertRegexpMatches(preview_text, r)
+
     def test_stack_create(self):
         self._script_keystone_client()
         resp = fakes.FakeHTTPResponse(
@@ -696,6 +752,99 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(create_text, r)
 
+    def test_stack_create_timeout(self):
+        self._script_keystone_client()
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        template_data = open(template_file).read()
+        resp = fakes.FakeHTTPResponse(
+            201,
+            'Created',
+            {'location': 'http://no.where/v1/tenant_id/stacks/teststack2/2'},
+            None)
+        expected_data = {
+            'files': {},
+            'disable_rollback': True,
+            'parameters': {'DBUsername': 'wp',
+                           'KeyName': 'heat_key',
+                           'LinuxDistribution': 'F17"',
+                           '"InstanceType': 'm1.large',
+                           'DBPassword': 'verybadpassword'},
+            'stack_name': 'teststack',
+            'environment': {},
+            'template': jsonutils.loads(template_data),
+            'timeout_mins': 123}
+        http.HTTPClient.json_request(
+            'POST', '/stacks', data=expected_data,
+            headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
+        ).AndReturn((resp, None))
+        fakes.script_heat_list()
+
+        self.m.ReplayAll()
+
+        create_text = self.shell(
+            'stack-create teststack '
+            '--template-file=%s '
+            '--timeout=123 '
+            '--parameters="InstanceType=m1.large;DBUsername=wp;'
+            'DBPassword=verybadpassword;KeyName=heat_key;'
+            'LinuxDistribution=F17"' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack',
+            '1'
+        ]
+
+        for r in required:
+            self.assertRegexpMatches(create_text, r)
+
+    def test_stack_update_timeout(self):
+        self._script_keystone_client()
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        template_data = open(template_file).read()
+        resp = fakes.FakeHTTPResponse(
+            202,
+            'Accepted',
+            {},
+            'The request is accepted for processing.')
+
+        expected_data = {
+            'files': {},
+            'environment': {},
+            'template': jsonutils.loads(template_data),
+            'parameters': {'DBUsername': 'wp',
+                           'KeyName': 'heat_key',
+                           'LinuxDistribution': 'F17"',
+                           '"InstanceType': 'm1.large',
+                           'DBPassword': 'verybadpassword'},
+            'timeout_mins': 123}
+        http.HTTPClient.json_request(
+            'PUT', '/stacks/teststack2/2',
+            data=expected_data,
+            headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
+        ).AndReturn((resp, None))
+        fakes.script_heat_list()
+
+        self.m.ReplayAll()
+
+        update_text = self.shell(
+            'stack-update teststack2/2 '
+            '--template-file=%s '
+            '--timeout 123 '
+            '--parameters="InstanceType=m1.large;DBUsername=wp;'
+            'DBPassword=verybadpassword;KeyName=heat_key;'
+            'LinuxDistribution=F17"' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack2',
+            '1'
+        ]
+        for r in required:
+            self.assertRegexpMatches(update_text, r)
+
     def test_stack_create_url(self):
 
         self._script_keystone_client()
@@ -704,12 +853,24 @@ class ShellTestUserPass(ShellBase):
             'Created',
             {'location': 'http://no.where/v1/tenant_id/stacks/teststack2/2'},
             None)
-        self.m.StubOutWithMock(urlutils, 'urlopen')
-        urlutils.urlopen('http://no.where/minimal.template').AndReturn(
+        self.m.StubOutWithMock(request, 'urlopen')
+        request.urlopen('http://no.where/minimal.template').AndReturn(
             six.StringIO('{"AWSTemplateFormatVersion" : "2010-09-09"}'))
 
+        expected_data = {
+            'files': {},
+            'disable_rollback': True,
+            'stack_name': 'teststack',
+            'environment': {},
+            'template': {"AWSTemplateFormatVersion": "2010-09-09"},
+            'parameters': {'DBUsername': 'wp',
+                           'KeyName': 'heat_key',
+                           'LinuxDistribution': 'F17"',
+                           '"InstanceType': 'm1.large',
+                           'DBPassword': 'verybadpassword'}}
+
         http.HTTPClient.json_request(
-            'POST', '/stacks', data=mox.IgnoreArg(),
+            'POST', '/stacks', data=expected_data,
             headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
         ).AndReturn((resp, None))
         fakes.script_heat_list()
@@ -996,8 +1157,8 @@ class ShellTestEvents(ShellBase):
         resource_name = 'testresource/1'
         http.HTTPClient.json_request(
             'GET', '/stacks/%s/resources/%s/events' % (
-                urlutils.quote(stack_id, ''),
-                urlutils.quote(strutils.safe_encode(
+                parse.quote(stack_id, ''),
+                parse.quote(strutils.safe_encode(
                     resource_name), ''))).AndReturn((resp, resp_dict))
 
         self.m.ReplayAll()
@@ -1053,10 +1214,10 @@ class ShellTestEvents(ShellBase):
         http.HTTPClient.json_request(
             'GET', '/stacks/%s/resources/%s/events/%s' %
             (
-                urlutils.quote(stack_id, ''),
-                urlutils.quote(strutils.safe_encode(
+                parse.quote(stack_id, ''),
+                parse.quote(strutils.safe_encode(
                     resource_name), ''),
-                urlutils.quote(self.event_id_one, '')
+                parse.quote(self.event_id_one, '')
             )).AndReturn((resp, resp_dict))
 
         self.m.ReplayAll()
@@ -1179,8 +1340,8 @@ class ShellTestResources(ShellBase):
         http.HTTPClient.json_request(
             'GET', '/stacks/%s/resources/%s' %
             (
-                urlutils.quote(stack_id, ''),
-                urlutils.quote(strutils.safe_encode(
+                parse.quote(stack_id, ''),
+                parse.quote(strutils.safe_encode(
                     resource_name), '')
             )).AndReturn((resp, resp_dict))
 
@@ -1224,8 +1385,8 @@ class ShellTestResources(ShellBase):
         http.HTTPClient.json_request(
             'POST', '/stacks/%s/resources/%s/signal' %
             (
-                urlutils.quote(stack_id, ''),
-                urlutils.quote(strutils.safe_encode(
+                parse.quote(stack_id, ''),
+                parse.quote(strutils.safe_encode(
                     resource_name), '')
             ),
             data={'message': 'Content'}).AndReturn((resp, ''))
@@ -1249,8 +1410,8 @@ class ShellTestResources(ShellBase):
         http.HTTPClient.json_request(
             'POST', '/stacks/%s/resources/%s/signal' %
             (
-                urlutils.quote(stack_id, ''),
-                urlutils.quote(strutils.safe_encode(
+                parse.quote(stack_id, ''),
+                parse.quote(strutils.safe_encode(
                     resource_name), '')
             ), data=None).AndReturn((resp, ''))
 
@@ -1312,8 +1473,8 @@ class ShellTestResources(ShellBase):
         http.HTTPClient.json_request(
             'POST', '/stacks/%s/resources/%s/signal' %
             (
-                urlutils.quote(stack_id, ''),
-                urlutils.quote(strutils.safe_encode(
+                parse.quote(stack_id, ''),
+                parse.quote(strutils.safe_encode(
                     resource_name), '')
             ),
             data={'message': 'Content'}).AndReturn((resp, ''))
@@ -1321,7 +1482,7 @@ class ShellTestResources(ShellBase):
         self.m.ReplayAll()
 
         with tempfile.NamedTemporaryFile() as data_file:
-            data_file.write('{"message":"Content"}')
+            data_file.write(b'{"message":"Content"}')
             data_file.flush()
             text = self.shell(
                 'resource-signal {0} {1} -f {2}'.format(

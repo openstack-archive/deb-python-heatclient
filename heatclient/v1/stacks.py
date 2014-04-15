@@ -14,14 +14,17 @@
 #    under the License.
 
 import six
+from six.moves.urllib import parse
 
 from heatclient.openstack.common.apiclient import base
-from heatclient.openstack.common.py3kcompat import urlutils
 
 
 class Stack(base.Resource):
     def __repr__(self):
         return "<Stack %s>" % self._info
+
+    def preview(self, **fields):
+        return self.manager.preview(**fields)
 
     def create(self, **fields):
         return self.manager.create(self.identifier, **fields)
@@ -78,7 +81,7 @@ class StackManager(base.BaseManager):
         def paginate(params):
             '''Paginate stacks, even if more than API limit.'''
             current_limit = int(params.get('limit') or 0)
-            url = '/stacks?%s' % urlutils.urlencode(params, True)
+            url = '/stacks?%s' % parse.urlencode(params, True)
             stacks = self._list(url, 'stacks')
             for stack in stacks:
                 yield stack
@@ -101,6 +104,13 @@ class StackManager(base.BaseManager):
                 params[key] = value
 
         return paginate(params)
+
+    def preview(self, **kwargs):
+        """Preview a stack."""
+        headers = self.client.credentials_headers()
+        resp, body = self.client.json_request('POST', '/stacks/preview',
+                                              data=kwargs, headers=headers)
+        return Stack(self, body['stack'])
 
     def create(self, **kwargs):
         """Create a stack."""
@@ -161,7 +171,13 @@ class StackChildManager(base.BaseManager):
         # then it is already {stack_name}/{stack_id}
         if stack_id.find('/') > 0:
             return stack_id
+        # We want to capture the redirect, not actually get the stack,
+        # since all we want is the stacks:lookup response to get the
+        # fully qualified ID, and not all users are allowed to do the
+        # redirected stacks:show, so pass follow_redirects=False
         resp, body = self.client.json_request('GET',
-                                              '/stacks/%s' % stack_id)
-        stack = body['stack']
-        return '%s/%s' % (stack['stack_name'], stack['id'])
+                                              '/stacks/%s' % stack_id,
+                                              follow_redirects=False)
+        location = resp.headers.get('location')
+        path = self.client.strip_endpoint(location)
+        return path[len('/stacks/'):]
