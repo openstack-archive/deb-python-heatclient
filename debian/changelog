@@ -2,6 +2,7 @@ python-heatclient (0.2.12-1) experimental; urgency=medium
 
   * New upstream release.
   * Updated (build-)depends for this release.
+  * Standards-Version is now 3.9.6 (no change).
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 13 Oct 2014 09:14:59 +0000
 
