@@ -1,3 +1,9 @@
+python-heatclient (0.2.12-1) experimental; urgency=medium
+
+  * New upstream release.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 13 Oct 2014 09:14:59 +0000
+
 python-heatclient (0.2.9-1) unstable; urgency=medium
 
   * New upstream release.
