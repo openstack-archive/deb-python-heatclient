@@ -37,11 +37,16 @@ print_list = cliutils.print_list
 
 
 def link_formatter(links):
-    return '\n'.join([l.get('href', '') for l in links or []])
+    def format_link(l):
+        if 'rel' in l:
+            return "%s (%s)" % (l.get('href', ''), l.get('rel', ''))
+        else:
+            return "%s" % (l.get('href', ''))
+    return '\n'.join(format_link(l) for l in links or [])
 
 
 def json_formatter(js):
-    return jsonutils.dumps(js, indent=2)
+    return jsonutils.dumps(js, indent=2, ensure_ascii=False)
 
 
 def text_wrap_formatter(d):
@@ -52,7 +57,8 @@ def newline_list_formatter(r):
     return '\n'.join(r or [])
 
 
-def print_dict(d, formatters={}):
+def print_dict(d, formatters=None):
+    formatters = formatters or {}
     pt = prettytable.PrettyTable(['Property', 'Value'],
                                  caching=False, print_empty=False)
     pt.align = 'l'

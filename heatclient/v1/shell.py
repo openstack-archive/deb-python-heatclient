@@ -21,6 +21,7 @@ import yaml
 from heatclient.common import template_utils
 from heatclient.common import utils
 from heatclient.openstack.common import jsonutils
+from heatclient.openstack.common import strutils
 
 import heatclient.exc as exc
 
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help='URL of template.')
 @utils.arg('-o', '--template-object', metavar='<URL>',
@@ -60,7 +62,8 @@ def do_create(hc, args):
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help='URL of template.')
 @utils.arg('-o', '--template-object', metavar='<URL>',
@@ -88,8 +91,8 @@ def do_stack_create(hc, args):
         args.template_url,
         args.template_object,
         hc.http_client.raw_request)
-    env_files, env = template_utils.process_environment_and_files(
-        env_path=args.environment_file)
+    env_files, env = template_utils.process_multiple_environments_and_files(
+        env_paths=args.environment_file)
 
     if args.create_timeout:
         logger.warning('-c/--create-timeout is deprecated, '
@@ -112,14 +115,9 @@ def do_stack_create(hc, args):
     do_stack_list(hc)
 
 
-@utils.arg('-f', '--template-file', metavar='<FILE>',
-           help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
-@utils.arg('-u', '--template-url', metavar='<URL>',
-           help='URL of template.')
-@utils.arg('-o', '--template-object', metavar='<URL>',
-           help='URL to retrieve template object (e.g from swift).')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
            type=int,
            help='Stack creation timeout in minutes.'
@@ -140,11 +138,6 @@ def do_stack_create(hc, args):
            help='Name of the stack to adopt.')
 def do_stack_adopt(hc, args):
     '''Adopt a stack.'''
-    tpl_files, template = template_utils.get_template_contents(
-        args.template_file,
-        args.template_url,
-        args.template_object,
-        hc.http_client.raw_request)
     env_files, env = template_utils.process_environment_and_files(
         env_path=args.environment_file)
 
@@ -163,8 +156,7 @@ def do_stack_adopt(hc, args):
         'disable_rollback': not(args.enable_rollback),
         'adopt_stack_data': adopt_data,
         'parameters': utils.format_parameters(args.parameters),
-        'template': template,
-        'files': dict(list(tpl_files.items()) + list(env_files.items())),
+        'files': dict(list(env_files.items())),
         'environment': env
     }
 
@@ -179,16 +171,18 @@ def do_stack_adopt(hc, args):
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help='URL of template.')
 @utils.arg('-o', '--template-object', metavar='<URL>',
-           help='URL to retrieve template object (e.g from swift)')
-@utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
-           default=60, type=int,
-           help='Stack timeout in minutes. Default: 60')
+           help='URL to retrieve template object (e.g. from swift)')
+@utils.arg('-t', '--timeout', metavar='<TIMEOUT>', type=int,
+           help='Stack creation timeout in minutes. This is only used during'
+           'validation in preview.')
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
-           help='Enable rollback on failure')
+           help='Enable rollback on failure. This option is not used during'
+           'preview and exists only for symmetry with stack-create.')
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help='Parameter values used to preview the stack. '
            'This can be specified multiple times, or once with parameters '
@@ -203,20 +197,18 @@ def do_stack_preview(hc, args):
         args.template_url,
         args.template_object,
         hc.http_client.raw_request)
-    env_files, env = template_utils.process_environment_and_files(
-        env_path=args.environment_file)
+    env_files, env = template_utils.process_multiple_environments_and_files(
+        env_paths=args.environment_file)
 
     fields = {
         'stack_name': args.name,
         'disable_rollback': not(args.enable_rollback),
+        'timeout_mins': args.timeout,
         'parameters': utils.format_parameters(args.parameters),
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
     }
-
-    if args.create_timeout:
-        fields['timeout_mins'] = args.create_timeout
 
     stack = hc.stacks.preview(**fields)
     formatters = {
@@ -258,17 +250,35 @@ def do_stack_delete(hc, args):
     do_stack_list(hc)
 
 
+@utils.arg('-O', '--output-file', metavar='<FILE>',
+           help='file to output abandon result. '
+           'If the option is specified, the result will be'
+           ' output into <FILE>.')
 @utils.arg('id', metavar='<NAME or ID>',
            help='Name or ID of stack to abandon.')
 def do_stack_abandon(hc, args):
-    '''Abandon the stack.'''
+    '''Abandon the stack.
+
+    This will delete the record of the stack from Heat, but will not delete
+    any of the underlying resources. Prints an adoptable JSON representation
+    of the stack to stdout or a file on success.
+    '''
     fields = {'stack_id': args.id}
     try:
         stack = hc.stacks.abandon(**fields)
     except exc.HTTPNotFound:
         raise exc.CommandError('Stack not found: %s' % args.id)
     else:
-        print(jsonutils.dumps(stack, indent=2))
+        result = jsonutils.dumps(stack, indent=2)
+        if args.output_file is not None:
+            try:
+                with open(args.output_file, "w") as f:
+                    f.write(result)
+            except IOError as err:
+                print(result)
+                raise exc.CommandError(str(err))
+        else:
+            print(result)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -290,6 +300,19 @@ def do_action_resume(hc, args):
     fields = {'stack_id': args.id}
     try:
         hc.actions.resume(**fields)
+    except exc.HTTPNotFound:
+        raise exc.CommandError('Stack not found: %s' % args.id)
+    else:
+        do_stack_list(hc)
+
+
+@utils.arg('id', metavar='<NAME or ID>',
+           help='Name or ID of stack to check.')
+def do_action_check(hc, args):
+    '''Check that stack resources are in expected states.'''
+    fields = {'stack_id': args.id}
+    try:
+        hc.actions.check(**fields)
     except exc.HTTPNotFound:
         raise exc.CommandError('Stack not found: %s' % args.id)
     else:
@@ -328,15 +351,40 @@ def do_stack_show(hc, args):
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help='URL of template.')
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g. from swift).')
+@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
+           type=int,
+           help='Stack update timeout in minutes.')
+@utils.arg('-r', '--enable-rollback', default=False, action="store_true",
+           help='DEPRECATED! Use --rollback argument instead. '
+           'Enable rollback on stack update failure. '
+           'NOTE: default behavior is now to use the rollback value '
+           'of existing stack.')
+@utils.arg('--rollback', default=None, metavar='<VALUE>',
+           help='Set rollback on update failure. '
+           'Values %(true)s  set rollback to enabled. '
+           'Values %(false)s set rollback to disabled. '
+           'Default is to use the value of existing stack to be updated.'
+           % {'true': strutils.TRUE_STRINGS, 'false': strutils.FALSE_STRINGS})
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help='Parameter values used to create the stack. '
            'This can be specified multiple times, or once with parameters '
            'separated by a semicolon.',
+           action='append')
+@utils.arg('-x', '--existing', default=False, action="store_true",
+           help='Re-use the set of parameters of the current stack. '
+           'Parameters specified in --parameters will patch over the existing '
+           'values in the current stack. Parameters omitted will keep '
+           'the existing values.')
+@utils.arg('-c', '--clear-parameter', metavar='<PARAMETER>',
+           help='Remove the parameters from the set of parameters of current '
+           'stack for the stack-update. The default value in the template '
+           'will be used. This can be specified multiple times.',
            action='append')
 @utils.arg('id', metavar='<NAME or ID>',
            help='Name or ID of stack to update.')
@@ -349,7 +397,8 @@ def do_update(hc, args):
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help='URL of template.')
 @utils.arg('-o', '--template-object', metavar='<URL>',
@@ -357,10 +406,31 @@ def do_update(hc, args):
 @utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
            type=int,
            help='Stack update timeout in minutes.')
+@utils.arg('-r', '--enable-rollback', default=False, action="store_true",
+           help='DEPRECATED! Use --rollback argument instead. '
+           'Enable rollback on stack update failure. '
+           'NOTE: default behavior is now to use the rollback value '
+           'of existing stack.')
+@utils.arg('--rollback', default=None, metavar='<VALUE>',
+           help='Set rollback on update failure. '
+           'Values %(true)s  set rollback to enabled. '
+           'Values %(false)s set rollback to disabled. '
+           'Default is to use the value of existing stack to be updated.'
+           % {'true': strutils.TRUE_STRINGS, 'false': strutils.FALSE_STRINGS})
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help='Parameter values used to create the stack. '
            'This can be specified multiple times, or once with parameters '
            'separated by a semicolon.',
+           action='append')
+@utils.arg('-x', '--existing', default=False, action="store_true",
+           help='Re-use the set of parameters of the current stack. '
+           'Parameters specified in --parameters will patch over the existing '
+           'values in the current stack. Parameters omitted will keep '
+           'the existing values.')
+@utils.arg('-c', '--clear-parameter', metavar='<PARAMETER>',
+           help='Remove the parameters from the set of parameters of current '
+           'stack for the stack-update. The default value in the template '
+           'will be used. This can be specified multiple times.',
            action='append')
 @utils.arg('id', metavar='<NAME or ID>',
            help='Name or ID of stack to update.')
@@ -373,12 +443,13 @@ def do_stack_update(hc, args):
         args.template_object,
         hc.http_client.raw_request)
 
-    env_files, env = template_utils.process_environment_and_files(
-        env_path=args.environment_file)
+    env_files, env = template_utils.process_multiple_environments_and_files(
+        env_paths=args.environment_file)
 
     fields = {
         'stack_id': args.id,
         'parameters': utils.format_parameters(args.parameters),
+        'existing': args.existing,
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
@@ -386,17 +457,49 @@ def do_stack_update(hc, args):
 
     if args.timeout:
         fields['timeout_mins'] = args.timeout
+    if args.clear_parameter:
+        fields['clear_parameters'] = list(args.clear_parameter)
+
+    if args.rollback is not None:
+        try:
+            rollback = strutils.bool_from_string(args.rollback, strict=True)
+        except ValueError as ex:
+            raise exc.CommandError(six.text_type(ex))
+        else:
+            fields['disable_rollback'] = not(rollback)
+    # TODO(pshchelo): remove the following 'else' clause after deprecation
+    # period of --enable-rollback switch and assign -r shortcut to --rollback
+    else:
+        if args.enable_rollback:
+            fields['disable_rollback'] = False
 
     hc.stacks.update(**fields)
     do_stack_list(hc)
 
 
-def do_list(hc, args=None):
+@utils.arg('id', metavar='<NAME or ID>',
+           help='Name or ID of stack to cancel update for.')
+def do_stack_cancel_update(hc, args):
+    '''Cancel currently running update of the stack.'''
+    fields = {'stack_id': args.id}
+    try:
+        hc.actions.cancel_update(**fields)
+    except exc.HTTPNotFound:
+        raise exc.CommandError('Stack not found: %s' % args.id)
+    else:
+        do_stack_list(hc)
+
+
+def do_list(hc, args):
     '''DEPRECATED! Use stack-list instead.'''
     logger.warning('DEPRECATED! Use stack-list instead.')
     do_stack_list(hc)
 
 
+@utils.arg('-s', '--show-deleted', default=False, action="store_true",
+           help='Include soft-deleted stacks in the stack listing.')
+@utils.arg('-n', '--show-nested', default=False, action="store_true",
+           help='Include nested stacks in the stack listing.')
 @utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help='Filter parameters to apply on returned stacks. '
            'This can be specified multiple times, or once with parameters '
@@ -406,16 +509,32 @@ def do_list(hc, args=None):
            help='Limit the number of stacks returned.')
 @utils.arg('-m', '--marker', metavar='<ID>',
            help='Only return stacks that appear after the given stack ID.')
+@utils.arg('-g', '--global-tenant', action='store_true', default=False,
+           help='Display stacks from all tenants. Operation only authorized '
+                'for users who match the policy in heat\'s policy.json.')
+@utils.arg('-o', '--show-owner', action='store_true', default=False,
+           help='Display stack owner information. This is automatically '
+                'enabled when using --global-tenant.')
 def do_stack_list(hc, args=None):
     '''List the user's stacks.'''
     kwargs = {}
+    fields = ['id', 'stack_name', 'stack_status', 'creation_time']
     if args:
         kwargs = {'limit': args.limit,
                   'marker': args.marker,
-                  'filters': utils.format_parameters(args.filters)}
+                  'filters': utils.format_parameters(args.filters),
+                  'global_tenant': args.global_tenant,
+                  'show_deleted': args.show_deleted}
+        if args.show_nested:
+            fields.append('parent')
+            kwargs['show_nested'] = True
+
+        if args.global_tenant or args.show_owner:
+            fields.insert(2, 'stack_owner')
+        if args.global_tenant:
+            fields.insert(2, 'project')
 
     stacks = hc.stacks.list(**kwargs)
-    fields = ['id', 'stack_name', 'stack_status', 'creation_time']
     utils.print_list(stacks, fields, sortby_index=3)
 
 
@@ -456,19 +575,18 @@ def do_output_show(hc, args):
         else:
             return
 
-        print (jsonutils.dumps(value, indent=2))
+        print (jsonutils.dumps(value, indent=2, ensure_ascii=False))
 
 
-def do_resource_type_list(hc, args={}):
+def do_resource_type_list(hc, args):
     '''List the available resource types.'''
-    kwargs = {}
-    types = hc.resource_types.list(**kwargs)
+    types = hc.resource_types.list()
     utils.print_list(types, ['resource_type'], sortby_index=0)
 
 
 @utils.arg('resource_type', metavar='<RESOURCE_TYPE>',
            help='Resource type to get the details for.')
-def do_resource_type_show(hc, args={}):
+def do_resource_type_show(hc, args):
     '''Show the resource type.'''
     try:
         resource_type = hc.resource_types.get(args.resource_type)
@@ -477,6 +595,26 @@ def do_resource_type_show(hc, args={}):
             'Resource Type not found: %s' % args.resource_type)
     else:
         print(jsonutils.dumps(resource_type, indent=2))
+
+
+@utils.arg('resource_type', metavar='<RESOURCE_TYPE>',
+           help='Resource type to generate a template for.')
+@utils.arg('-F', '--format', metavar='<FORMAT>',
+           help="The template output format, one of: %s."
+                % ', '.join(utils.supported_formats.keys()))
+def do_resource_type_template(hc, args):
+    '''Generate a template based on a resource type.'''
+    fields = {'resource_type': args.resource_type}
+    try:
+        template = hc.resource_types.generate_template(**fields)
+    except exc.HTTPNotFound:
+        raise exc.CommandError(
+            'Resource Type %s not found.' % args.resource_type)
+    else:
+        if args.format:
+            print(utils.format_output(template, format=args.format))
+        else:
+            print(utils.format_output(template))
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -500,7 +638,7 @@ def do_template_show(hc, args):
         if 'heat_template_version' in template:
             print(yaml.safe_dump(template, indent=2))
         else:
-            print(jsonutils.dumps(template, indent=2))
+            print(jsonutils.dumps(template, indent=2, ensure_ascii=False))
 
 
 @utils.arg('-u', '--template-url', metavar='<URL>',
@@ -508,14 +646,10 @@ def do_template_show(hc, args):
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g. from swift).')
-@utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
-           help='Parameter values to validate. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.',
-           action='append')
 def do_validate(hc, args):
     '''DEPRECATED! Use template-validate instead.'''
     logger.warning('DEPRECATED! Use template-validate instead.')
@@ -527,14 +661,10 @@ def do_validate(hc, args):
 @utils.arg('-f', '--template-file', metavar='<FILE>',
            help='Path to the template.')
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help='Path to the environment.')
+           help='Path to the environment, it can be specified multiple times.',
+           action='append')
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help='URL to retrieve template object (e.g. from swift).')
-@utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
-           help='Parameter values to validate. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.',
-           action='append')
 def do_template_validate(hc, args):
     '''Validate a template with parameters.'''
 
@@ -544,37 +674,44 @@ def do_template_validate(hc, args):
         args.template_object,
         hc.http_client.raw_request)
 
-    env_files, env = template_utils.process_environment_and_files(
-        env_path=args.environment_file)
+    env_files, env = template_utils.process_multiple_environments_and_files(
+        env_paths=args.environment_file)
     fields = {
-        'parameters': utils.format_parameters(args.parameters),
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
     }
 
     validation = hc.stacks.validate(**fields)
-    print(jsonutils.dumps(validation, indent=2))
+    print(jsonutils.dumps(validation, indent=2, ensure_ascii=False))
 
 
 @utils.arg('id', metavar='<NAME or ID>',
            help='Name or ID of stack to show the resources for.')
+@utils.arg('-n', '--nested-depth', metavar='<DEPTH>',
+           help='Depth of nested stacks from which to display resources.')
 def do_resource_list(hc, args):
     '''Show list of resources belonging to a stack.'''
-    fields = {'stack_id': args.id}
+    fields = {
+        'stack_id': args.id,
+        'nested_depth': args.nested_depth,
+    }
     try:
         resources = hc.resources.list(**fields)
     except exc.HTTPNotFound:
         raise exc.CommandError('Stack not found: %s' % args.id)
     else:
-        fields = ['resource_type', 'resource_status', 'updated_time']
-        if len(resources) >= 1:
-            if hasattr(resources[0], 'resource_name'):
-                fields.insert(0, 'resource_name')
-            else:
-                fields.insert(0, 'logical_resource_id')
+        fields = ['physical_resource_id', 'resource_type',
+                  'resource_status', 'updated_time']
+        if len(resources) >= 1 and not hasattr(resources[0], 'resource_name'):
+            fields.insert(0, 'logical_resource_id')
+        else:
+            fields.insert(0, 'resource_name')
 
-        utils.print_list(resources, fields, sortby_index=3)
+        if args.nested_depth:
+            fields.append('parent_resource')
+
+        utils.print_list(resources, fields, sortby_index=4)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -608,23 +745,15 @@ def do_resource_show(hc, args):
         utils.print_dict(resource.to_dict(), formatters=formatters)
 
 
-@utils.arg('resource', metavar='<RESOURCE>',
-           help='Name of the resource to generate a template for.')
+@utils.arg('resource_type', metavar='<RESOURCE_TYPE>',
+           help='Resource type to generate a template for.')
 @utils.arg('-F', '--format', metavar='<FORMAT>',
            help="The template output format, one of: %s."
                 % ', '.join(utils.supported_formats.keys()))
 def do_resource_template(hc, args):
-    '''Generate a template based on a resource.'''
-    fields = {'resource_name': args.resource}
-    try:
-        template = hc.resources.generate_template(**fields)
-    except exc.HTTPNotFound:
-        raise exc.CommandError('Resource %s not found.' % args.resource)
-    else:
-        if args.format:
-            print(utils.format_output(template, format=args.format))
-        else:
-            print(utils.format_output(template))
+    '''DEPRECATED! Use resource-type-template instead.'''
+    logger.warning('DEPRECATED! Use resource-type-template instead.')
+    do_resource_type_template(hc, args)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -684,10 +813,22 @@ def do_resource_signal(hc, args):
            help='Name or ID of stack to show the events for.')
 @utils.arg('-r', '--resource', metavar='<RESOURCE>',
            help='Name of the resource to filter events by.')
+@utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
+           help='Filter parameters to apply on returned events. '
+           'This can be specified multiple times, or once with parameters '
+           'separated by a semicolon.',
+           action='append')
+@utils.arg('-l', '--limit', metavar='<LIMIT>',
+           help='Limit the number of events returned.')
+@utils.arg('-m', '--marker', metavar='<ID>',
+           help='Only return events that appear after the given event ID.')
 def do_event_list(hc, args):
     '''List events for a stack.'''
     fields = {'stack_id': args.id,
-              'resource_name': args.resource}
+              'resource_name': args.resource,
+              'limit': args.limit,
+              'marker': args.marker,
+              'filters': utils.format_parameters(args.filters)}
     try:
         events = hc.events.list(**fields)
     except exc.HTTPNotFound as ex:
@@ -702,7 +843,7 @@ def do_event_list(hc, args):
                 fields.insert(0, 'resource_name')
             else:
                 fields.insert(0, 'logical_resource_id')
-        utils.print_list(events, fields)
+        utils.print_list(events, fields, sortby_index=None)
 
 
 @utils.arg('id', metavar='<NAME or ID>',

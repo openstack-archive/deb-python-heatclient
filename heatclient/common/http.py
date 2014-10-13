@@ -14,6 +14,7 @@
 #    under the License.
 
 import copy
+import hashlib
 import logging
 import os
 import socket
@@ -23,14 +24,15 @@ import six
 from six.moves.urllib import parse
 
 from heatclient import exc
+from heatclient.openstack.common import importutils
 from heatclient.openstack.common import jsonutils
 from heatclient.openstack.common import strutils
 
 LOG = logging.getLogger(__name__)
-if not LOG.handlers:
-    LOG.addHandler(logging.StreamHandler())
 USER_AGENT = 'python-heatclient'
 CHUNKSIZE = 1024 * 64  # 64kB
+SENSITIVE_HEADERS = ('X-Auth-Token',)
+osprofiler_web = importutils.try_import("osprofiler.web")
 
 
 def get_system_ca_file():
@@ -81,12 +83,21 @@ class HTTPClient(object):
             else:
                 self.verify_cert = kwargs.get('ca_file', get_system_ca_file())
 
+    def safe_header(self, name, value):
+        if name in SENSITIVE_HEADERS:
+            # because in python3 byte string handling is ... ug
+            v = value.encode('utf-8')
+            h = hashlib.sha1(v)
+            d = h.hexdigest()
+            return strutils.safe_decode(name), "{SHA1}%s" % d
+        else:
+            return strutils.safe_decode(name), strutils.safe_decode(value)
+
     def log_curl_request(self, method, url, kwargs):
         curl = ['curl -i -X %s' % method]
 
         for (key, value) in kwargs['headers'].items():
-            header = '-H \'%s: %s\'' % (strutils.safe_decode(key),
-                                        strutils.safe_decode(value))
+            header = '-H \'%s: %s\'' % self.safe_header(key, value)
             curl.append(header)
 
         conn_params_fmt = [
@@ -140,6 +151,8 @@ class HTTPClient(object):
             kwargs['headers'].setdefault('X-Region-Name', self.region_name)
         if self.include_pass and not 'X-Auth-Key' in kwargs['headers']:
             kwargs['headers'].update(self.credentials_headers())
+        if osprofiler_web:
+            kwargs['headers'].update(osprofiler_web.get_trace_id_headers())
 
         self.log_curl_request(method, url, kwargs)
 
@@ -162,7 +175,7 @@ class HTTPClient(object):
         # that we should follow that URL with the same method as before,
         # requests doesn't follow that and send a GET instead for the method.
         # Hopefully this could be fixed as they say in a comment in a future
-        # point version i.e: 3.x
+        # point version i.e.: 3.x
         # See issue: https://github.com/kennethreitz/requests/issues/1704
         allow_redirects = False
 
@@ -210,7 +223,7 @@ class HTTPClient(object):
         if location is None:
             message = "Location not returned with 302"
             raise exc.InvalidEndpoint(message=message)
-        elif location.startswith(self.endpoint):
+        elif location.lower().startswith(self.endpoint.lower()):
             return location[len(self.endpoint):]
         else:
             message = "Prohibited endpoint redirect %s" % location
@@ -218,6 +231,12 @@ class HTTPClient(object):
 
     def credentials_headers(self):
         creds = {}
+        # NOTE(dhu): (shardy) When deferred_auth_method=password, Heat
+        # encrypts and stores username/password.  For Keystone v3, the
+        # intent is to use trusts since SHARDY is working towards
+        # deferred_auth_method=trusts as the default.
+        # TODO(dhu): Make Keystone v3 work in Heat standalone mode.  Maye
+        # require X-Auth-User-Domain.
         if self.username:
             creds['X-Auth-User'] = self.username
         if self.password:
@@ -271,3 +290,76 @@ class HTTPClient(object):
 
     def patch(self, url, **kwargs):
         return self.client_request("PATCH", url, **kwargs)
+
+
+class SessionClient(HTTPClient):
+    """HTTP client based on Keystone client session."""
+
+    # NOTE(dhu):  Will eventually move to a common session client.
+    # https://bugs.launchpad.net/python-keystoneclient/+bug/1332337
+    def __init__(self, session, auth, endpoint, **kwargs):
+        self.session = session
+        self.auth = auth
+        self.endpoint = endpoint
+
+        self.auth_url = kwargs.get('auth_url')
+        self.region_name = kwargs.get('region_name')
+        self.interface = kwargs.get('interface',
+                                    kwargs.get('endpoint_type', 'public'))
+        self.service_type = kwargs.get('service_type')
+
+        self.include_pass = kwargs.get('include_pass')
+        self.username = kwargs.get('username')
+        self.password = kwargs.get('password')
+        # see if we can get the auth_url from auth plugin if one is not
+        # provided from kwargs
+        if not self.auth_url and hasattr(self.auth, 'auth_url'):
+            self.auth_url = self.auth.auth_url
+
+    def _http_request(self, url, method, **kwargs):
+        kwargs.setdefault('user_agent', USER_AGENT)
+        kwargs.setdefault('auth', self.auth)
+
+        endpoint_filter = kwargs.setdefault('endpoint_filter', {})
+        endpoint_filter.setdefault('interface', self.interface)
+        endpoint_filter.setdefault('service_type', self.service_type)
+        endpoint_filter.setdefault('region_name', self.region_name)
+
+        # TODO(gyee): what are these headers for?
+        if self.auth_url:
+            kwargs['headers'].setdefault('X-Auth-Url', self.auth_url)
+        if self.region_name:
+            kwargs['headers'].setdefault('X-Region-Name', self.region_name)
+        if self.include_pass and 'X-Auth-Key' not in kwargs['headers']:
+            kwargs['headers'].update(self.credentials_headers())
+
+        # Allow caller to specify not to follow redirects, in which case we
+        # just return the redirect response.  Useful for using stacks:lookup.
+        follow_redirects = kwargs.pop('follow_redirects', True)
+
+        resp = self.session.request(url, method, redirect=follow_redirects,
+                                    raise_exc=False, **kwargs)
+
+        if 400 <= resp.status_code < 600:
+            raise exc.from_response(resp)
+        elif resp.status_code in (301, 302, 305):
+            # Redirected. Reissue the request to the new location,
+            # unless caller specified follow_redirects=False
+            if follow_redirects:
+                location = resp.headers.get('location')
+                path = self.strip_endpoint(location)
+                resp = self._http_request(path, method, **kwargs)
+        elif resp.status_code == 300:
+            raise exc.from_response(resp)
+
+        return resp
+
+
+def _construct_http_client(*args, **kwargs):
+    session = kwargs.pop('session', None)
+    auth = kwargs.pop('auth', None)
+
+    if session:
+        return SessionClient(session, auth, *args, **kwargs)
+    else:
+        return HTTPClient(*args, **kwargs)
