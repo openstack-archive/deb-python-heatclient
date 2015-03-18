@@ -13,10 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import six
 from six.moves.urllib import parse
 
+from oslo.utils import encodeutils
+
 from heatclient.openstack.common.apiclient import base
-from heatclient.openstack.common import strutils
 from heatclient.v1 import stacks
 
 DEFAULT_PAGE_SIZE = 20
@@ -39,20 +41,32 @@ class Event(base.Resource):
 class EventManager(stacks.StackChildManager):
     resource_class = Event
 
-    def list(self, stack_id, resource_name=None):
+    def list(self, stack_id, resource_name=None, **kwargs):
         """Get a list of events.
         :param stack_id: ID of stack the events belong to
         :param resource_name: Optional name of resources to filter events by
         :rtype: list of :class:`Event`
         """
+        params = {}
+        if 'filters' in kwargs:
+            filters = kwargs.pop('filters')
+            params.update(filters)
+
+        for key, value in six.iteritems(kwargs):
+            if value:
+                params[key] = value
+
         if resource_name is None:
             url = '/stacks/%s/events' % stack_id
         else:
             stack_id = self._resolve_stack_id(stack_id)
             url = '/stacks/%s/resources/%s/events' % (
-                  parse.quote(stack_id, ''),
-                  parse.quote(strutils.safe_encode(resource_name), ''))
-        return self._list(url, "events")
+                parse.quote(stack_id, ''),
+                parse.quote(encodeutils.safe_encode(resource_name), ''))
+        if params:
+            url += '?%s' % parse.urlencode(params, True)
+
+        return self._list(url, 'events')
 
     def get(self, stack_id, resource_name, event_id):
         """Get the details for a specific event.
@@ -64,7 +78,7 @@ class EventManager(stacks.StackChildManager):
         stack_id = self._resolve_stack_id(stack_id)
         url_str = '/stacks/%s/resources/%s/events/%s' % (
                   parse.quote(stack_id, ''),
-                  parse.quote(strutils.safe_encode(resource_name), ''),
+                  parse.quote(encodeutils.safe_encode(resource_name), ''),
                   parse.quote(event_id, ''))
         resp, body = self.client.json_request('GET', url_str)
         return Event(self, body['event'])

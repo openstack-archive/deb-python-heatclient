@@ -12,7 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from heatclient.v1.resources import ResourceManager
+from heatclient.v1 import resources
 
 from mox3 import mox
 import testtools
@@ -39,7 +39,7 @@ class ResourceManagerTest(testtools.TestCase):
                 ret = key and {key: []} or {}
                 return {}, {key: ret}
 
-        manager = ResourceManager(FakeAPI())
+        manager = resources.ResourceManager(FakeAPI())
         self.m.StubOutWithMock(manager, '_resolve_stack_id')
         manager._resolve_stack_id('teststack').AndReturn('teststack/abcd1234')
         self.m.ReplayAll()
@@ -82,7 +82,28 @@ class ResourceManagerTest(testtools.TestCase):
                 assert args[0] == expect
                 return FakeResponse()
 
-        manager = ResourceManager(FakeClient())
+        manager = resources.ResourceManager(FakeClient())
+        self.m.StubOutWithMock(manager, '_resolve_stack_id')
+        manager._resolve_stack_id('teststack').AndReturn('teststack/abcd1234')
+        self.m.ReplayAll()
+
+        manager.list(**fields)
+
+    def test_list_nested(self):
+        fields = {'stack_id': 'teststack', 'nested_depth': '99'}
+        expect = ('/stacks/teststack/resources?nested_depth=99')
+        key = 'resources'
+
+        class FakeResponse(object):
+            def json(self):
+                return {key: {}}
+
+        class FakeClient(object):
+            def get(self, *args, **kwargs):
+                assert args[0] == expect
+                return FakeResponse()
+
+        manager = resources.ResourceManager(FakeClient())
         self.m.StubOutWithMock(manager, '_resolve_stack_id')
         manager._resolve_stack_id('teststack').AndReturn('teststack/abcd1234')
         self.m.ReplayAll()

@@ -97,6 +97,11 @@ class shellTest(testtools.TestCase):
                 {'href': 'http://foo.example.com'},
                 {'href': 'http://bar.example.com'}]))
         self.assertEqual(
+            'http://foo.example.com (a)\nhttp://bar.example.com (b)',
+            utils.link_formatter([
+                {'href': 'http://foo.example.com', 'rel': 'a'},
+                {'href': 'http://bar.example.com', 'rel': 'b'}]))
+        self.assertEqual(
             '\n',
             utils.link_formatter([
                 {'hrf': 'http://foo.example.com'},
@@ -107,6 +112,8 @@ class shellTest(testtools.TestCase):
         self.assertEqual('{}', utils.json_formatter({}))
         self.assertEqual('{\n  "foo": "bar"\n}',
                          utils.json_formatter({"foo": "bar"}))
+        self.assertEqual(u'{\n  "Uni": "test\u2665"\n}',
+                         utils.json_formatter({"Uni": u"test\u2665"}))
 
     def test_text_wrap_formatter(self):
         self.assertEqual('', utils.text_wrap_formatter(None))

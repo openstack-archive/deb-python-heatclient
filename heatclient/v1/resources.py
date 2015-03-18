@@ -15,8 +15,9 @@
 
 from six.moves.urllib import parse
 
+from oslo.utils import encodeutils
+
 from heatclient.openstack.common.apiclient import base
-from heatclient.openstack.common import strutils
 from heatclient.v1 import stacks
 
 DEFAULT_PAGE_SIZE = 20
@@ -39,11 +40,13 @@ class Resource(base.Resource):
 class ResourceManager(stacks.StackChildManager):
     resource_class = Resource
 
-    def list(self, stack_id):
+    def list(self, stack_id, nested_depth=0):
         """Get a list of resources.
         :rtype: list of :class:`Resource`
         """
         url = '/stacks/%s/resources' % stack_id
+        if nested_depth:
+            url += '?nested_depth=%s' % nested_depth
         return self._list(url, "resources")
 
     def get(self, stack_id, resource_name):
@@ -55,7 +58,7 @@ class ResourceManager(stacks.StackChildManager):
         stack_id = self._resolve_stack_id(stack_id)
         url_str = '/stacks/%s/resources/%s' % (
                   parse.quote(stack_id, ''),
-                  parse.quote(strutils.safe_encode(resource_name), ''))
+                  parse.quote(encodeutils.safe_encode(resource_name), ''))
         resp, body = self.client.json_request('GET', url_str)
         return Resource(self, body['resource'])
 
@@ -68,7 +71,7 @@ class ResourceManager(stacks.StackChildManager):
         stack_id = self._resolve_stack_id(stack_id)
         url_str = '/stacks/%s/resources/%s/metadata' % (
                   parse.quote(stack_id, ''),
-                  parse.quote(strutils.safe_encode(resource_name), ''))
+                  parse.quote(encodeutils.safe_encode(resource_name), ''))
         resp, body = self.client.json_request('GET', url_str)
         return body['metadata']
 
@@ -81,12 +84,15 @@ class ResourceManager(stacks.StackChildManager):
         stack_id = self._resolve_stack_id(stack_id)
         url_str = '/stacks/%s/resources/%s/signal' % (
                   parse.quote(stack_id, ''),
-                  parse.quote(strutils.safe_encode(resource_name), ''))
+                  parse.quote(encodeutils.safe_encode(resource_name), ''))
         resp, body = self.client.json_request('POST', url_str, data=data)
         return body
 
     def generate_template(self, resource_name):
+        """DEPRECATED! Use `generate_template` of `ResourceTypeManager`
+        instead.
+        """
         url_str = '/resource_types/%s/template' % (
-                  parse.quote(strutils.safe_encode(resource_name), ''))
+                  parse.quote(encodeutils.safe_encode(resource_name), ''))
         resp, body = self.client.json_request('GET', url_str)
         return body

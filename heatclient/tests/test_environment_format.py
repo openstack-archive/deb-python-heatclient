@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -28,6 +26,7 @@ class YamlEnvironmentTest(testtools.TestCase):
     def test_minimal_yaml(self):
         yaml1 = ''
         yaml2 = '''
+parameter_defaults: {}
 parameters: {}
 resource_registry: {}
 '''
@@ -56,7 +55,7 @@ parameters: }
         self.assertIn(expect, str(e))
 
     def test_parse_document(self):
-        env = '["foo" , "bar"]'
+        env = '["foo", "bar"]'
         expect = 'The environment is not a valid YAML mapping data type.'
         e = self.assertRaises(ValueError, environment_format.parse, env)
         self.assertIn(expect, str(e))

@@ -1,6 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
-#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -13,13 +10,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from heatclient.common.template_format import yaml_loader
+from heatclient.common import template_format
+from heatclient.openstack.common._i18n import _
 
 import yaml
 
 
-SECTIONS = (PARAMETERS, RESOURCE_REGISTRY) = \
-           ('parameters', 'resource_registry')
+SECTIONS = (PARAMETER_DEFAULTS, PARAMETERS, RESOURCE_REGISTRY) = \
+           ('parameter_defaults', 'parameters', 'resource_registry')
 
 
 def parse(env_str):
@@ -29,19 +27,19 @@ def parse(env_str):
     YAML format.
     '''
     try:
-        env = yaml.load(env_str, Loader=yaml_loader)
+        env = yaml.load(env_str, Loader=template_format.yaml_loader)
     except yaml.YAMLError as yea:
         raise ValueError(yea)
     else:
         if env is None:
             env = {}
         elif not isinstance(env, dict):
-            raise ValueError('The environment is not a valid '
-                             'YAML mapping data type.')
+            raise ValueError(_('The environment is not a valid '
+                             'YAML mapping data type.'))
 
     for param in env:
         if param not in SECTIONS:
-            raise ValueError('environment has wrong section "%s"' % param)
+            raise ValueError(_('environment has wrong section "%s"') % param)
 
     return env
 

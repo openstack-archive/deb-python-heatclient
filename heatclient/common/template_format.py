@@ -1,6 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
-#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -15,6 +12,8 @@
 
 import json
 import yaml
+
+from heatclient.openstack.common._i18n import _
 
 if hasattr(yaml, 'CSafeLoader'):
     yaml_loader = yaml.CSafeLoader
@@ -60,5 +59,5 @@ def parse(tmpl_str):
     if not ('HeatTemplateFormatVersion' in tpl
             or 'heat_template_version' in tpl
             or 'AWSTemplateFormatVersion' in tpl):
-        raise ValueError("Template format version not found.")
+        raise ValueError(_("Template format version not found."))
     return tpl

@@ -38,6 +38,21 @@ class Stack(base.Resource):
     def abandon(self):
         return self.manager.abandon(self.identifier)
 
+    def snapshot(self, name=None):
+        return self.manager.snapshot(self.identifier, name)
+
+    def snapshot_show(self, snapshot_id):
+        return self.manager.snapshot_show(self.identifier, snapshot_id)
+
+    def snapshot_delete(self, snapshot_id):
+        return self.manager.snapshot_delete(self.identifier, snapshot_id)
+
+    def restore(self, snapshot_id):
+        return self.manager.restore(self.identifier, snapshot_id)
+
+    def snapshot_list(self):
+        return self.manager.snapshot_list(self.identifier)
+
     def get(self):
         # set_loaded() first ... so if we have to bail, we know we tried.
         self._loaded = True
@@ -122,7 +137,8 @@ class StackManager(base.BaseManager):
     def update(self, stack_id, **kwargs):
         """Update a stack."""
         headers = self.client.credentials_headers()
-        resp, body = self.client.json_request('PUT', '/stacks/%s' % stack_id,
+        method = 'PATCH' if kwargs.pop('existing', None) else 'PUT'
+        resp, body = self.client.json_request(method, '/stacks/%s' % stack_id,
                                               data=kwargs, headers=headers)
 
     def delete(self, stack_id):
@@ -135,6 +151,47 @@ class StackManager(base.BaseManager):
         resp, body = self.client.json_request(
             'DELETE',
             '/stacks/%s/abandon' % stack.identifier)
+        return body
+
+    def snapshot(self, stack_id, name=None):
+        """Snapshot a stack."""
+        stack = self.get(stack_id)
+        data = {}
+        if name:
+            data['name'] = name
+        resp, body = self.client.json_request(
+            'POST',
+            '/stacks/%s/snapshots' % stack.identifier,
+            data=data)
+        return body
+
+    def snapshot_show(self, stack_id, snapshot_id):
+        stack = self.get(stack_id)
+        resp, body = self.client.json_request(
+            'GET',
+            '/stacks/%s/snapshots/%s' % (stack.identifier, snapshot_id))
+        return body
+
+    def snapshot_delete(self, stack_id, snapshot_id):
+        stack = self.get(stack_id)
+        resp, body = self.client.json_request(
+            'DELETE',
+            '/stacks/%s/snapshots/%s' % (stack.identifier, snapshot_id))
+        return body
+
+    def restore(self, stack_id, snapshot_id):
+        stack = self.get(stack_id)
+        resp, body = self.client.json_request(
+            'POST',
+            '/stacks/%s/snapshots/%s/restore' % (stack.identifier,
+                                                 snapshot_id))
+        return body
+
+    def snapshot_list(self, stack_id):
+        stack = self.get(stack_id)
+        resp, body = self.client.json_request(
+            'GET',
+            '/stacks/%s/snapshots' % stack.identifier)
         return body
 
     def get(self, stack_id):
