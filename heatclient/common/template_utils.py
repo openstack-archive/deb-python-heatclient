@@ -13,18 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import base64
 import collections
-import os
+from oslo_serialization import jsonutils
 import six
-from six.moves.urllib import error
 from six.moves.urllib import parse
 from six.moves.urllib import request
 
-from oslo.serialization import jsonutils
-
 from heatclient.common import environment_format
 from heatclient.common import template_format
+from heatclient.common import utils
 from heatclient import exc
 from heatclient.openstack.common._i18n import _
 
@@ -35,7 +32,7 @@ def get_template_contents(template_file=None, template_url=None,
 
     # Transform a bare file path to a file:// URL.
     if template_file:
-        template_url = normalise_file_path_to_url(template_file)
+        template_url = utils.normalise_file_path_to_url(template_file)
 
     if template_url:
         tpl = request.urlopen(template_url).read()
@@ -65,21 +62,24 @@ def get_template_contents(template_file=None, template_url=None,
         raise exc.CommandError(_('Error parsing template %(url)s %(error)s') %
                                {'url': template_url, 'error': e})
 
-    tmpl_base_url = base_url_for_url(template_url)
+    tmpl_base_url = utils.base_url_for_url(template_url)
     if files is None:
         files = {}
     resolve_template_get_files(template, files, tmpl_base_url)
-    resolve_template_type(template, files, tmpl_base_url)
     return files, template
 
 
 def resolve_template_get_files(template, files, template_base_url):
 
     def ignore_if(key, value):
-        if key != 'get_file':
+        if key != 'get_file' and key != 'type':
             return True
         if not isinstance(value, six.string_types):
             return True
+        if (key == 'type' and
+                not value.endswith(('.yaml', '.template'))):
+            return True
+        return False
 
     def recurse_if(value):
         return isinstance(value, (dict, list))
@@ -88,26 +88,18 @@ def resolve_template_get_files(template, files, template_base_url):
                       ignore_if, recurse_if)
 
 
-def resolve_template_type(template, files, template_base_url):
-
-    def ignore_if(key, value):
-        if key != 'type':
-            return True
-        if not isinstance(value, six.string_types):
-            return True
-        if not value.endswith(('.yaml', '.template')):
-            return True
+def is_template(file_content):
+    try:
+        if isinstance(file_content, six.binary_type):
+            file_content = file_content.decode('utf-8')
+        template_format.parse(file_content)
+    except (ValueError, TypeError):
         return False
-
-    def recurse_if(value):
-        return isinstance(value, (dict, list))
-
-    get_file_contents(template, files, template_base_url,
-                      ignore_if, recurse_if, file_is_template=True)
+    return True
 
 
 def get_file_contents(from_data, files, base_url=None,
-                      ignore_if=None, recurse_if=None, file_is_template=False):
+                      ignore_if=None, recurse_if=None):
 
     if recurse_if and recurse_if(from_data):
         if isinstance(from_data, dict):
@@ -115,8 +107,7 @@ def get_file_contents(from_data, files, base_url=None,
         else:
             recurse_data = from_data
         for value in recurse_data:
-            get_file_contents(value, files, base_url, ignore_if, recurse_if,
-                              file_is_template=file_is_template)
+            get_file_contents(value, files, base_url, ignore_if, recurse_if)
 
     if isinstance(from_data, dict):
         for key, value in iter(from_data.items()):
@@ -128,42 +119,29 @@ def get_file_contents(from_data, files, base_url=None,
 
             str_url = parse.urljoin(base_url, value)
             if str_url not in files:
-                if file_is_template:
+                file_content = read_url_content(str_url)
+                if is_template(file_content):
                     template = get_template_contents(
                         template_url=str_url, files=files)[1]
                     file_content = jsonutils.dumps(template)
-                else:
-                    file_content = read_url_content(str_url)
                 files[str_url] = file_content
             # replace the data value with the normalised absolute URL
             from_data[key] = str_url
 
 
 def read_url_content(url):
-    try:
-        content = request.urlopen(url).read()
-    except error.URLError:
-        raise exc.CommandError(_('Could not fetch contents for %s') % url)
-
-    if content:
-        try:
-            content.decode('utf-8')
-        except ValueError:
-            content = base64.encodestring(content)
-    return content
+    '''DEPRECATED!  Use 'utils.read_url_content' instead.'''
+    return utils.read_url_content(url)
 
 
 def base_url_for_url(url):
-    parsed = parse.urlparse(url)
-    parsed_dir = os.path.dirname(parsed.path)
-    return parse.urljoin(url, parsed_dir)
+    '''DEPRECATED! Use 'utils.base_url_for_url' instead.'''
+    return utils.base_url_for_url(url)
 
 
 def normalise_file_path_to_url(path):
-    if parse.urlparse(path).scheme:
-        return path
-    path = os.path.abspath(path)
-    return parse.urljoin('file:', request.pathname2url(path))
+    '''DEPRECATED! Use 'utils.normalise_file_path_to_url' instead.'''
+    return utils.normalise_file_path_to_url(path)
 
 
 def deep_update(old, new):
@@ -204,8 +182,8 @@ def process_environment_and_files(env_path=None, template=None,
     env = {}
 
     if env_path:
-        env_url = normalise_file_path_to_url(env_path)
-        env_base_url = base_url_for_url(env_url)
+        env_url = utils.normalise_file_path_to_url(env_path)
+        env_base_url = utils.base_url_for_url(env_url)
         raw_env = request.urlopen(env_url).read()
         env = environment_format.parse(raw_env)
 
@@ -233,10 +211,12 @@ def resolve_environment_urls(resource_registry, files, env_base_url):
             # Built in providers like: "X::Compute::Server"
             # don't need downloading.
             return True
+        if key == 'hooks':
+            return True
 
-    get_file_contents(rr, files, base_url, ignore_if, file_is_template=True)
+    get_file_contents(rr, files, base_url, ignore_if)
 
     for res_name, res_dict in iter(rr.get('resources', {}).items()):
         res_base_url = res_dict.get('base_url', base_url)
         get_file_contents(
-            res_dict, files, res_base_url, ignore_if, file_is_template=True)
+            res_dict, files, res_base_url, ignore_if)

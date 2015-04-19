@@ -26,8 +26,8 @@ import testtools
 import uuid
 import yaml
 
-from oslo.serialization import jsonutils
-from oslo.utils import encodeutils
+from oslo_serialization import jsonutils
+from oslo_utils import encodeutils
 from requests_mock.contrib import fixture as rm_fixture
 
 from keystoneclient import fixture as keystone_fixture
@@ -39,6 +39,7 @@ from heatclient.common import utils
 from heatclient import exc
 import heatclient.shell
 from heatclient.tests import fakes
+import heatclient.v1.shell
 
 load_tests = testscenarios.load_tests_apply_scenarios
 TEST_VAR_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
@@ -123,13 +124,18 @@ class TestCase(testtools.TestCase):
     def register_keystone_v2_token_fixture(self):
         v2_token = keystone_fixture.V2Token(token_id=self.tokenid)
         service = v2_token.add_service('orchestration')
-        service.add_endpoint('http://heat.example.com', region='RegionOne')
+        service.add_endpoint('http://heat.example.com',
+                             admin='http://heat-admin.localdomain',
+                             internal='http://heat.localdomain',
+                             region='RegionOne')
         self.requests.post('%s/tokens' % V2_URL, json=v2_token)
 
     def register_keystone_v3_token_fixture(self):
         v3_token = keystone_fixture.V3Token()
         service = v3_token.add_service('orchestration')
-        service.add_standard_endpoints(public='http://heat.example.com')
+        service.add_standard_endpoints(public='http://heat.example.com',
+                                       admin='http://heat-admin.localdomain',
+                                       internal='http://heat.localdomain')
         self.requests.post('%s/auth/tokens' % V3_URL,
                            json=v3_token,
                            headers={'X-Subject-Token': self.tokenid})
@@ -262,6 +268,17 @@ class ShellValidationTest(TestCase):
         self.set_fake_env(FAKE_ENV_KEYSTONE_V2)
         self.shell_error(
             'stack-create teststack '
+            '--parameters="InstanceType=m1.large;DBUsername=wp;'
+            'DBPassword=verybadpassword;KeyName=heat_key;'
+            'LinuxDistribution=F17"',
+            'Need to specify exactly one of')
+
+    def test_stack_create_with_paramfile_validation(self):
+        self.register_keystone_auth_fixture()
+        self.set_fake_env(FAKE_ENV_KEYSTONE_V2)
+        self.shell_error(
+            'stack-create teststack '
+            '--parameter-file private_key=private_key.env '
             '--parameters="InstanceType=m1.large;DBUsername=wp;'
             'DBPassword=verybadpassword;KeyName=heat_key;'
             'LinuxDistribution=F17"',
@@ -423,6 +440,77 @@ class ShellTestNoMoxV3(ShellTestNoMox):
 
     def _set_fake_env(self):
         self.set_fake_env(FAKE_ENV_KEYSTONE_V3)
+
+
+class ShellTestEndpointType(TestCase):
+
+    def setUp(self):
+        super(ShellTestEndpointType, self).setUp()
+        self.m = mox.Mox()
+        self.m.StubOutWithMock(http, '_construct_http_client')
+        self.m.StubOutWithMock(heatclient.v1.shell, 'do_stack_list')
+        self.addCleanup(self.m.VerifyAll)
+        self.addCleanup(self.m.UnsetStubs)
+        self.set_fake_env(FAKE_ENV_KEYSTONE_V2)
+
+    def test_endpoint_type_public_url(self):
+        self.register_keystone_auth_fixture()
+        kwargs = {
+            'auth_url': 'http://keystone.example.com:5000/',
+            'session': mox.IgnoreArg(),
+            'auth': mox.IgnoreArg(),
+            'service_type': 'orchestration',
+            'endpoint_type': 'publicURL',
+            'region_name': '',
+            'username': 'username',
+            'password': 'password',
+            'include_pass': False
+        }
+        http._construct_http_client(u'http://heat.example.com', **kwargs)
+        heatclient.v1.shell.do_stack_list(mox.IgnoreArg(), mox.IgnoreArg())
+
+        self.m.ReplayAll()
+        heatclient.shell.main(('stack-list',))
+
+    def test_endpoint_type_admin_url(self):
+        self.register_keystone_auth_fixture()
+        kwargs = {
+            'auth_url': 'http://keystone.example.com:5000/',
+            'session': mox.IgnoreArg(),
+            'auth': mox.IgnoreArg(),
+            'service_type': 'orchestration',
+            'endpoint_type': 'adminURL',
+            'region_name': '',
+            'username': 'username',
+            'password': 'password',
+            'include_pass': False
+        }
+        http._construct_http_client(u'http://heat-admin.localdomain', **kwargs)
+        heatclient.v1.shell.do_stack_list(mox.IgnoreArg(), mox.IgnoreArg())
+
+        self.m.ReplayAll()
+        heatclient.shell.main(('--os-endpoint-type=adminURL', 'stack-list',))
+
+    def test_endpoint_type_internal_url(self):
+        self.register_keystone_auth_fixture()
+        self.useFixture(fixtures.EnvironmentVariable('OS_ENDPOINT_TYPE',
+                                                     'internalURL'))
+        kwargs = {
+            'auth_url': 'http://keystone.example.com:5000/',
+            'session': mox.IgnoreArg(),
+            'auth': mox.IgnoreArg(),
+            'service_type': 'orchestration',
+            'endpoint_type': 'internalURL',
+            'region_name': '',
+            'username': 'username',
+            'password': 'password',
+            'include_pass': False
+        }
+        http._construct_http_client(u'http://heat.localdomain', **kwargs)
+        heatclient.v1.shell.do_stack_list(mox.IgnoreArg(), mox.IgnoreArg())
+
+        self.m.ReplayAll()
+        heatclient.shell.main(('stack-list',))
 
 
 class ShellTestCommon(ShellBase):
@@ -1049,7 +1137,6 @@ class ShellTestUserPass(ShellBase):
             headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
         ).AndReturn((resp, None))
         fakes.script_heat_list()
-
         self.m.ReplayAll()
 
         template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
@@ -1059,6 +1146,78 @@ class ShellTestUserPass(ShellBase):
             '--parameters="InstanceType=m1.large;DBUsername=wp;'
             'DBPassword=verybadpassword;KeyName=heat_key;'
             'LinuxDistribution=F17"' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack',
+            '1'
+        ]
+
+        for r in required:
+            self.assertRegexpMatches(create_text, r)
+
+    def test_stack_create_param_file(self):
+        self.register_keystone_auth_fixture()
+        resp = fakes.FakeHTTPResponse(
+            201,
+            'Created',
+            {'location': 'http://no.where/v1/tenant_id/stacks/teststack2/2'},
+            None)
+        http.HTTPClient.json_request(
+            'POST', '/stacks', data=mox.IgnoreArg(),
+            headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
+        ).AndReturn((resp, None))
+        fakes.script_heat_list()
+
+        self.m.StubOutWithMock(utils, 'read_url_content')
+        url = 'file://%s/private_key.env' % TEST_VAR_DIR
+        utils.read_url_content(url).AndReturn('xxxxxx')
+        self.m.ReplayAll()
+
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        create_text = self.shell(
+            'stack-create teststack '
+            '--template-file=%s '
+            '--parameter-file private_key=private_key.env '
+            '--parameters="InstanceType=m1.large;DBUsername=wp;'
+            'DBPassword=verybadpassword;KeyName=heat_key;'
+            'LinuxDistribution=F17"' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack',
+            '1'
+        ]
+
+        for r in required:
+            self.assertRegexpMatches(create_text, r)
+
+    def test_stack_create_only_param_file(self):
+        self.register_keystone_auth_fixture()
+        resp = fakes.FakeHTTPResponse(
+            201,
+            'Created',
+            {'location': 'http://no.where/v1/tenant_id/stacks/teststack2/2'},
+            None)
+        http.HTTPClient.json_request(
+            'POST', '/stacks', data=mox.IgnoreArg(),
+            headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
+        ).AndReturn((resp, None))
+        fakes.script_heat_list()
+
+        self.m.StubOutWithMock(utils, 'read_url_content')
+        url = 'file://%s/private_key.env' % TEST_VAR_DIR
+        utils.read_url_content(url).AndReturn('xxxxxx')
+        self.m.ReplayAll()
+
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        create_text = self.shell(
+            'stack-create teststack '
+            '--template-file=%s '
+            '--parameter-file private_key=private_key.env '
+            % template_file)
 
         required = [
             'stack_name',
@@ -1954,7 +2113,7 @@ class ShellTestEvents(ShellBase):
         stack_id = 'teststack/1'
         resource_name = 'testresource/1'
         http.HTTPClient.json_request(
-            'GET', '/stacks/%s/resources/%s/events' % (
+            'GET', '/stacks/%s/resources/%s/events?sort_dir=asc' % (
                 parse.quote(stack_id, ''),
                 parse.quote(encodeutils.safe_encode(
                     resource_name), ''))).AndReturn((resp, resp_dict))
@@ -2674,6 +2833,76 @@ class ShellTestDeployment(ShellBase):
         ]
         for r in required:
             self.assertRegexpMatches(build_info_text, r)
+
+    def test_deploy_output_show(self):
+        self.register_keystone_auth_fixture()
+        resp_dict = {'software_deployment': {
+            'status': 'COMPLETE',
+            'server_id': '700115e5-0100-4ecc-9ef7-9e05f27d8803',
+            'config_id': '18c4fc03-f897-4a1d-aaad-2b7622e60257',
+            'output_values': {
+                'deploy_stdout': '',
+                'deploy_stderr': '',
+                'deploy_status_code': 0,
+                'result': 'The result value',
+                'dict_output': {'foo': 'bar'},
+                'list_output': ['foo', 'bar']
+            },
+            'input_values': {},
+            'action': 'CREATE',
+            'status_reason': 'Outputs received',
+            'id': 'defg'
+        }}
+
+        resp_string = jsonutils.dumps(resp_dict)
+        headers = {'content-type': 'application/json'}
+        http_resp = fakes.FakeHTTPResponse(200, 'OK', headers, resp_string)
+        response = (http_resp, resp_dict)
+        http.HTTPClient.json_request(
+            'GET', '/software_deployments/defgh').AndRaise(exc.HTTPNotFound())
+        http.HTTPClient.json_request(
+            'GET', '/software_deployments/defg').MultipleTimes().AndReturn(
+                response)
+
+        self.m.ReplayAll()
+
+        self.assertRaises(exc.CommandError, self.shell,
+                          'deployment-output-show defgh result')
+        self.assertEqual(
+            'The result value\n',
+            self.shell('deployment-output-show defg result'))
+        self.assertEqual(
+            '"The result value"\n',
+            self.shell('deployment-output-show --format json defg result'))
+
+        self.assertEqual(
+            '{\n  "foo": "bar"\n}\n',
+            self.shell('deployment-output-show defg dict_output'))
+        self.assertEqual(
+            self.shell(
+                'deployment-output-show --format raw defg dict_output'),
+            self.shell(
+                'deployment-output-show --format json defg dict_output'))
+
+        self.assertEqual(
+            '[\n  "foo", \n  "bar"\n]\n',
+            self.shell('deployment-output-show defg list_output'))
+        self.assertEqual(
+            self.shell(
+                'deployment-output-show --format raw defg list_output'),
+            self.shell(
+                'deployment-output-show --format json defg list_output'))
+
+        self.assertEqual({
+            'deploy_stdout': '',
+            'deploy_stderr': '',
+            'deploy_status_code': 0,
+            'result': 'The result value',
+            'dict_output': {'foo': 'bar'},
+            'list_output': ['foo', 'bar']},
+            jsonutils.loads(self.shell(
+                'deployment-output-show --format json defg --all'))
+        )
 
 
 class ShellTestBuildInfo(ShellBase):

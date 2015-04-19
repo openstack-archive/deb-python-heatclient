@@ -13,19 +13,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import fnmatch
 import logging
+
+from oslo_serialization import jsonutils
+from oslo_utils import strutils
 import six
 from six.moves.urllib import request
 import yaml
 
-from oslo.serialization import jsonutils
-from oslo.utils import strutils
-
+from heatclient.common import deployment_utils
 from heatclient.common import template_format
 from heatclient.common import template_utils
 from heatclient.common import utils
 
 from heatclient.openstack.common._i18n import _
+from heatclient.openstack.common._i18n import _LE
 from heatclient.openstack.common._i18n import _LW
 
 import heatclient.exc as exc
@@ -67,8 +70,16 @@ def _authenticated_fetcher(hc):
            'This can be specified multiple times, or once with parameters '
            'separated by a semicolon.'),
            action='append')
+@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
+           help=_('Parameter values from file used to create the stack. '
+           'This can be specified multiple times. Parameter value '
+           'would be the content of the file'),
+           action='append')
 @utils.arg('name', metavar='<STACK_NAME>',
            help=_('Name of the stack to create.'))
+@utils.arg('--pre-create', metavar='<RESOURCE>',
+           default=None, action='append',
+           help=_('Name of a resource to set a pre-create hook to.'))
 def do_create(hc, args):
     '''DEPRECATED! Use stack-create instead.'''
     logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
@@ -82,6 +93,14 @@ def do_create(hc, args):
            help=_('Path to the environment, it can be specified '
                   'multiple times.'),
            action='append')
+@utils.arg('--pre-create', metavar='<RESOURCE>',
+           default=None, action='append',
+           help=_('Name of a resource to set a pre-create hook to. Resources '
+                  'in nested stacks can be set using slash as a separator: '
+                  'nested_stack/another/my_resource. You can use wildcards '
+                  'to match multiple stacks or resources: '
+                  'nested_stack/an*/*_resource. This can be specified '
+                  'multiple times'))
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help=_('URL of template.'))
 @utils.arg('-o', '--template-object', metavar='<URL>',
@@ -100,6 +119,11 @@ def do_create(hc, args):
            help=_('Parameter values used to create the stack. '
            'This can be specified multiple times, or once with parameters '
            'separated by a semicolon.'),
+           action='append')
+@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
+           help=_('Parameter values from file used to create the stack. '
+           'This can be specified multiple times. Parameter value '
+           'would be the content of the file'),
            action='append')
 @utils.arg('name', metavar='<STACK_NAME>',
            help=_('Name of the stack to create.'))
@@ -121,10 +145,16 @@ def do_stack_create(hc, args):
                            'arg2': '-t/--timeout'
                        })
 
+    if args.pre_create:
+        hooks_to_env(env, args.pre_create, 'pre-create')
+
     fields = {
         'stack_name': args.name,
         'disable_rollback': not(args.enable_rollback),
-        'parameters': utils.format_parameters(args.parameters),
+        'parameters': utils.format_all_parameters(args.parameters,
+                                                  args.parameter_file,
+                                                  args.template_file,
+                                                  args.template_url),
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
@@ -136,6 +166,31 @@ def do_stack_create(hc, args):
 
     hc.stacks.create(**fields)
     do_stack_list(hc)
+
+
+def hooks_to_env(env, arg_hooks, hook):
+    '''Add hooks from args to environment's resource_registry section.
+
+    Hooks are either "resource_name" (if it's a top-level resource) or
+    "nested_stack/resource_name" (if the resource is in a nested stack).
+
+    The environment expects each hook to be associated with the resource
+    within `resource_registry/resources` using the `hooks: pre-create` format.
+
+    '''
+    if 'resource_registry' not in env:
+        env['resource_registry'] = {}
+    if 'resources' not in env['resource_registry']:
+        env['resource_registry']['resources'] = {}
+    for hook_declaration in arg_hooks:
+        hook_path = [r for r in hook_declaration.split('/') if r]
+        resources = env['resource_registry']['resources']
+        for nested_stack in hook_path:
+            if nested_stack not in resources:
+                resources[nested_stack] = {}
+            resources = resources[nested_stack]
+        else:
+            resources['hooks'] = hook
 
 
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
@@ -170,7 +225,7 @@ def do_stack_adopt(hc, args):
         raise exc.CommandError(_('Need to specify %(arg)s') %
                                {'arg': '--adopt-file'})
 
-    adopt_url = template_utils.normalise_file_path_to_url(args.adopt_file)
+    adopt_url = utils.normalise_file_path_to_url(args.adopt_file)
     adopt_data = request.urlopen(adopt_url).read()
 
     if args.create_timeout:
@@ -220,6 +275,11 @@ def do_stack_adopt(hc, args):
            'This can be specified multiple times, or once with parameters '
            'separated by semicolon.'),
            action='append')
+@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
+           help=_('Parameter values from file used to create the stack. '
+           'This can be specified multiple times. Parameter value '
+           'would be the content of the file'),
+           action='append')
 @utils.arg('name', metavar='<STACK_NAME>',
            help=_('Name of the stack to preview.'))
 def do_stack_preview(hc, args):
@@ -236,7 +296,10 @@ def do_stack_preview(hc, args):
         'stack_name': args.name,
         'disable_rollback': not(args.enable_rollback),
         'timeout_mins': args.timeout,
-        'parameters': utils.format_parameters(args.parameters),
+        'parameters': utils.format_all_parameters(args.parameters,
+                                                  args.parameter_file,
+                                                  args.template_file,
+                                                  args.template_url),
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
@@ -412,6 +475,11 @@ def do_stack_show(hc, args):
            'This can be specified multiple times, or once with parameters '
            'separated by a semicolon.'),
            action='append')
+@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
+           help=_('Parameter values from file used to create the stack. '
+           'This can be specified multiple times. Parameter value '
+           'would be the content of the file'),
+           action='append')
 @utils.arg('-x', '--existing', default=False, action="store_true",
            help=_('Re-use the set of parameters of the current stack. '
            'Parameters specified in %(arg)s will patch over the existing '
@@ -425,6 +493,9 @@ def do_stack_show(hc, args):
            action='append')
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to update.'))
+@utils.arg('--pre-update', metavar='<RESOURCE>',
+           default=None, action='append',
+           help=_('Name of a resource to set a pre-update hook to.'))
 def do_update(hc, args):
     '''DEPRECATED! Use stack-update instead.'''
     logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
@@ -438,6 +509,14 @@ def do_update(hc, args):
            help=_('Path to the environment, it can be specified '
                   'multiple times.'),
            action='append')
+@utils.arg('--pre-update', metavar='<RESOURCE>',
+           default=None, action='append',
+           help=_('Name of a resource to set a pre-update hook to. Resources '
+                  'in nested stacks can be set using slash as a separator: '
+                  'nested_stack/another/my_resource. You can use wildcards '
+                  'to match multiple stacks or resources: '
+                  'nested_stack/an*/*_resource. This can be specified '
+                  'multiple times'))
 @utils.arg('-u', '--template-url', metavar='<URL>',
            help=_('URL of template.'))
 @utils.arg('-o', '--template-object', metavar='<URL>',
@@ -461,6 +540,11 @@ def do_update(hc, args):
            help=_('Parameter values used to create the stack. '
            'This can be specified multiple times, or once with parameters '
            'separated by a semicolon.'),
+           action='append')
+@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
+           help=_('Parameter values from file used to create the stack. '
+           'This can be specified multiple times. Parameter value '
+           'would be the content of the file'),
            action='append')
 @utils.arg('-x', '--existing', default=False, action="store_true",
            help=_('Re-use the set of parameters of the current stack. '
@@ -488,9 +572,15 @@ def do_stack_update(hc, args):
     env_files, env = template_utils.process_multiple_environments_and_files(
         env_paths=args.environment_file)
 
+    if args.pre_update:
+        hooks_to_env(env, args.pre_update, 'pre-update')
+
     fields = {
         'stack_id': args.id,
-        'parameters': utils.format_parameters(args.parameters),
+        'parameters': utils.format_all_parameters(args.parameters,
+                                                  args.parameter_file,
+                                                  args.template_file,
+                                                  args.template_url),
         'existing': args.existing,
         'template': template,
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
@@ -864,7 +954,7 @@ def do_resource_signal(hc, args):
     if data and data_file:
         raise exc.CommandError(_('Can only specify one of data and data-file'))
     if data_file:
-        data_url = template_utils.normalise_file_path_to_url(data_file)
+        data_url = utils.normalise_file_path_to_url(data_file)
         data = request.urlopen(data_url).read()
     if data:
         if isinstance(data, six.binary_type):
@@ -882,6 +972,63 @@ def do_resource_signal(hc, args):
         raise exc.CommandError(_('Stack or resource not found: '
                                  '%(id)s %(resource)s') %
                                {'id': args.id, 'resource': args.resource})
+
+
+@utils.arg('id', metavar='<NAME or ID>',
+           help=_('Name or ID of the stack these resources belong to.'))
+@utils.arg('--pre-create', action='store_true', default=False,
+           help=_('Clear the pre-create hooks'))
+@utils.arg('--pre-update', action='store_true', default=False,
+           help=_('Clear the pre-update hooks'))
+@utils.arg('hook', metavar='<RESOURCE>', nargs='+',
+           help=_('Resource names with hooks to clear. Resources '
+                  'in nested stacks can be set using slash as a separator: '
+                  'nested_stack/another/my_resource. You can use wildcards '
+                  'to match multiple stacks or resources: '
+                  'nested_stack/an*/*_resource'))
+def do_hook_clear(hc, args):
+    '''Clear hooks on a given stack.'''
+    if not (args.pre_create or args.pre_update):
+        raise exc.CommandError(
+            "You must specify at least one hook type (--pre-create, "
+            "--pre-update or both)")
+    for hook_string in args.hook:
+        hook = [b for b in hook_string.split('/') if b]
+        resource_pattern = hook[-1]
+        stack_id = args.id
+
+        def clear_hook(stack_id, resource_name, hook_type):
+            try:
+                hc.resources.signal(
+                    stack_id=stack_id,
+                    resource_name=resource_name,
+                    data={'unset_hook': hook_type})
+            except exc.HTTPNotFound:
+                logger.error(
+                    _LE("Stack %(stack)s or resource %(resource)s not found"),
+                    {'resource': resource_name, 'stack': stack_id})
+
+        def clear_wildcard_hooks(stack_id, stack_patterns):
+            if stack_patterns:
+                for resource in hc.resources.list(stack_id):
+                    res_name = resource.resource_name
+                    if fnmatch.fnmatchcase(res_name, stack_patterns[0]):
+                        nested_stack = hc.resources.get(
+                            stack_id=stack_id,
+                            resource_name=res_name)
+                        clear_wildcard_hooks(
+                            nested_stack.physical_resource_id,
+                            stack_patterns[1:])
+            else:
+                for resource in hc.resources.list(stack_id):
+                    res_name = resource.resource_name
+                    if fnmatch.fnmatchcase(res_name, resource_pattern):
+                        if args.pre_create:
+                            clear_hook(stack_id, res_name, 'pre-create')
+                        if args.pre_update:
+                            clear_hook(stack_id, res_name, 'pre-update')
+
+        clear_wildcard_hooks(stack_id, hook[:-1])
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -903,7 +1050,8 @@ def do_event_list(hc, args):
               'resource_name': args.resource,
               'limit': args.limit,
               'marker': args.marker,
-              'filters': utils.format_parameters(args.filters)}
+              'filters': utils.format_parameters(args.filters),
+              'sort_dir': 'asc'}
     try:
         events = hc.events.list(**fields)
     except exc.HTTPNotFound as ex:
@@ -977,7 +1125,7 @@ def do_config_create(hc, args):
 
     defn = {}
     if args.definition_file:
-        defn_url = template_utils.normalise_file_path_to_url(
+        defn_url = utils.normalise_file_path_to_url(
             args.definition_file)
         defn_raw = request.urlopen(defn_url).read() or '{}'
         defn = yaml.load(defn_raw, Loader=template_format.yaml_loader)
@@ -987,7 +1135,7 @@ def do_config_create(hc, args):
     config['options'] = defn.get('options', {})
 
     if args.config_file:
-        config_url = template_utils.normalise_file_path_to_url(
+        config_url = utils.normalise_file_path_to_url(
             args.config_file)
         config['config'] = request.urlopen(config_url).read()
 
@@ -1043,6 +1191,65 @@ def do_config_delete(hc, args):
                                  "configs."))
 
 
+@utils.arg('-i', '--input-value', metavar='<KEY=VALUE>',
+           help=_('Input value to set on the deployment. '
+                  'This can be specified multiple times.'),
+           action='append')
+@utils.arg('-a', '--action', metavar='<ACTION>', default='UPDATE',
+           help=_('Name of action for this deployment. '
+                  'Can be a custom action, or one of: '
+                  'CREATE, UPDATE, DELETE, SUSPEND, RESUME'))
+@utils.arg('-c', '--config', metavar='<CONFIG>',
+           help=_('ID of the configuration to deploy.'))
+@utils.arg('-s', '--server', metavar='<SERVER>',
+           help=_('ID of the server being deployed to.'))
+@utils.arg('-t', '--signal-transport',
+           default='TEMP_URL_SIGNAL',
+           metavar='<TRANSPORT>',
+           help=_('How the server should signal to heat with the deployment '
+                  'output values. TEMP_URL_SIGNAL will create a '
+                  'Swift TempURL to be signaled via HTTP PUT. NO_SIGNAL will '
+                  'result in the resource going to the COMPLETE state '
+                  'without waiting for any signal.'))
+@utils.arg('--container', metavar='<CONTAINER_NAME>',
+           help=_('Optional name of container to store TEMP_URL_SIGNAL '
+                  'objects in. If not specified a container will be created '
+                  'with a name derived from the DEPLOY_NAME'))
+@utils.arg('--timeout', metavar='<TIMEOUT>',
+           type=int,
+           default=60,
+           help=_('Deployment timeout in minutes.'))
+@utils.arg('name', metavar='<DEPLOY_NAME>',
+           help=_('Name of the derived config associated with this '
+                  'deployment. This is used to apply a sort order to the '
+                  'list of configurations currently deployed to the server.'))
+def do_deployment_create(hc, args):
+    try:
+        config = hc.software_configs.get(config_id=args.config)
+    except exc.HTTPNotFound:
+        raise exc.CommandError(_('Configuration not found: %s') % args.id)
+
+    derrived_params = deployment_utils.build_derived_config_params(
+        action=args.action,
+        source=config,
+        name=args.name,
+        input_values=utils.format_parameters(args.input_value, False),
+        server_id=args.server,
+        signal_transport=args.signal_transport,
+        signal_id=deployment_utils.build_signal_id(hc, args)
+    )
+    derived_config = hc.software_configs.create(**derrived_params)
+
+    sd = hc.software_deployments.create(
+        tenant_id='asdf',
+        config_id=derived_config.id,
+        server_id=args.server,
+        action=args.action,
+        status='IN_PROGRESS'
+    )
+    print(jsonutils.dumps(sd.to_dict(), indent=2))
+
+
 @utils.arg('id', metavar='<ID>',
            help=_('ID of the deployment.'))
 def do_deployment_show(hc, args):
@@ -1050,7 +1257,7 @@ def do_deployment_show(hc, args):
     try:
         sd = hc.software_deployments.get(deployment_id=args.id)
     except exc.HTTPNotFound:
-        raise exc.CommandError('Deployment not found: %s' % args.id)
+        raise exc.CommandError(_('Deployment not found: %s') % args.id)
     else:
         print(jsonutils.dumps(sd.to_dict(), indent=2))
 
@@ -1078,6 +1285,45 @@ def do_deployment_delete(hc, args):
     if failure_count == len(args.id):
         raise exc.CommandError(_("Unable to delete any of the specified "
                                  "deployments."))
+
+
+@utils.arg('id', metavar='<ID>',
+           help=_('ID deployment to show the output for.'))
+@utils.arg('output', metavar='<OUTPUT NAME>', nargs='?', default=None,
+           help=_('Name of an output to display.'))
+@utils.arg('-a', '--all', default=False, action='store_true',
+           help=_('Display all deployment outputs.'))
+@utils.arg('-F', '--format', metavar='<FORMAT>',
+           help=_('The output value format, one of: raw, json'),
+           default='raw')
+def do_deployment_output_show(hc, args):
+    '''Show a specific stack output.'''
+    if (not args.all and args.output is None or
+            args.all and args.output is not None):
+        raise exc.CommandError(
+            _('Error: either %(output)s or %(all)s argument is needed.')
+            % {'output': '<OUTPUT NAME>', 'all': '--all'})
+    try:
+        sd = hc.software_deployments.get(deployment_id=args.id)
+    except exc.HTTPNotFound:
+        raise exc.CommandError(_('Deployment not found: %s') % args.id)
+    outputs = sd.to_dict().get('output_values', {})
+
+    if args.all:
+        print(utils.json_formatter(outputs))
+    else:
+        for output_key, value in outputs.items():
+            if output_key == args.output:
+                break
+        else:
+            return
+
+        if (args.format == 'json'
+                or isinstance(value, dict)
+                or isinstance(value, list)):
+            print(utils.json_formatter(value))
+        else:
+            print(value)
 
 
 def do_build_info(hc, args):

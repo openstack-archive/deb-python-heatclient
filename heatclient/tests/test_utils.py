@@ -14,10 +14,12 @@
 #    under the License.
 from heatclient.common import utils
 from heatclient import exc
+import mock
+import os
 import testtools
 
 
-class shellTest(testtools.TestCase):
+class ShellTest(testtools.TestCase):
 
     def test_format_parameter_none(self):
         self.assertEqual({}, utils.format_parameters(None))
@@ -65,6 +67,12 @@ class shellTest(testtools.TestCase):
                           'DnsSecKey': 'hsgx1m31;PbaNF4WEcHlwj;IlCGgfOdoB;58/'
                                        'ww7a4oAO;NQ/fD==',
                           'UpstreamDNS': '8.8.8.8'}, p)
+
+    def test_format_parameters_parse_semicolon_false(self):
+        p = utils.format_parameters(
+            ['KeyName=heat_key;UpstreamDNS=8.8.8.8;a=b'],
+            parse_semicolon=False)
+        self.assertEqual({'KeyName': 'heat_key;UpstreamDNS=8.8.8.8;a=b'}, p)
 
     def test_format_parameters_multiple_values_per_pamaters(self):
         p = utils.format_parameters([
@@ -131,3 +139,120 @@ class shellTest(testtools.TestCase):
         self.assertEqual('', utils.newline_list_formatter([]))
         self.assertEqual('one\ntwo',
                          utils.newline_list_formatter(['one', 'two']))
+
+
+class ShellTestParameterFiles(testtools.TestCase):
+
+    def test_format_parameter_file_none(self):
+        self.assertEqual({}, utils.format_parameter_file(None))
+
+    def test_format_parameter_file(self):
+        tmpl_file = '/opt/stack/template.yaml'
+        contents = 'DBUsername=wp\nDBPassword=verybadpassword'
+        utils.read_url_content = mock.MagicMock()
+        utils.read_url_content.return_value = 'DBUsername=wp\n' \
+                                              'DBPassword=verybadpassword'
+
+        p = utils.format_parameter_file([
+            'env_file1=test_file1'], tmpl_file)
+        self.assertEqual({'env_file1': contents
+                          }, p)
+
+    def test_format_parameter_file_no_template(self):
+        tmpl_file = None
+        contents = 'DBUsername=wp\nDBPassword=verybadpassword'
+        utils.read_url_content = mock.MagicMock()
+        utils.read_url_content.return_value = 'DBUsername=wp\n' \
+                                              'DBPassword=verybadpassword'
+        p = utils.format_parameter_file([
+            'env_file1=test_file1'], tmpl_file)
+        self.assertEqual({'env_file1': contents
+                          }, p)
+
+    def test_format_all_parameters(self):
+        tmpl_file = '/opt/stack/template.yaml'
+        contents = 'DBUsername=wp\nDBPassword=verybadpassword'
+        params = ['KeyName=heat_key;UpstreamDNS=8.8.8.8']
+        utils.read_url_content = mock.MagicMock()
+        utils.read_url_content.return_value = 'DBUsername=wp\n' \
+                                              'DBPassword=verybadpassword'
+        p = utils.format_all_parameters(params, [
+            'env_file1=test_file1'], template_file=tmpl_file)
+        self.assertEqual({'KeyName': 'heat_key',
+                          'UpstreamDNS': '8.8.8.8',
+                          'env_file1': contents}, p)
+
+
+class TestURLFunctions(testtools.TestCase):
+
+    def setUp(self):
+        super(TestURLFunctions, self).setUp()
+        self.m = mock.MagicMock()
+
+        self.addCleanup(self.m.VerifyAll)
+        self.addCleanup(self.m.UnsetStubs)
+
+    def test_normalise_file_path_to_url_relative(self):
+        self.assertEqual(
+            'file://%s/foo' % os.getcwd(),
+            utils.normalise_file_path_to_url(
+                'foo'))
+
+    def test_normalise_file_path_to_url_absolute(self):
+        self.assertEqual(
+            'file:///tmp/foo',
+            utils.normalise_file_path_to_url(
+                '/tmp/foo'))
+
+    def test_normalise_file_path_to_url_file(self):
+        self.assertEqual(
+            'file:///tmp/foo',
+            utils.normalise_file_path_to_url(
+                'file:///tmp/foo'))
+
+    def test_normalise_file_path_to_url_http(self):
+        self.assertEqual(
+            'http://localhost/foo',
+            utils.normalise_file_path_to_url(
+                'http://localhost/foo'))
+
+    def test_get_template_url(self):
+        tmpl_file = '/opt/stack/template.yaml'
+        tmpl_url = 'file:///opt/stack/template.yaml'
+        self.assertEqual(utils.get_template_url(tmpl_file, None),
+                         tmpl_url)
+        self.assertEqual(utils.get_template_url(None, tmpl_url),
+                         tmpl_url)
+        self.assertEqual(utils.get_template_url(None, None),
+                         None)
+
+    def test_base_url_for_url(self):
+        self.assertEqual(
+            'file:///foo/bar',
+            utils.base_url_for_url(
+                'file:///foo/bar/baz'))
+        self.assertEqual(
+            'file:///foo/bar',
+            utils.base_url_for_url(
+                'file:///foo/bar/baz.txt'))
+        self.assertEqual(
+            'file:///foo/bar',
+            utils.base_url_for_url(
+                'file:///foo/bar/'))
+        self.assertEqual(
+            'file:///',
+            utils.base_url_for_url(
+                'file:///'))
+        self.assertEqual(
+            'file:///',
+            utils.base_url_for_url(
+                'file:///foo'))
+
+        self.assertEqual(
+            'http://foo/bar',
+            utils.base_url_for_url(
+                'http://foo/bar/'))
+        self.assertEqual(
+            'http://foo/bar',
+            utils.base_url_for_url(
+                'http://foo/bar/baz.template'))
