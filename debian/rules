@@ -26,17 +26,10 @@ override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	rm -rf .testrepository
 	testr init
-	set -e && \
-		TEMP_REZ=`mktemp -t` && \
-		PYTHONPATH=$(CURDIR) testr run --subunit | tee $$TEMP_REZ | subunit2pyunit && \
-		cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats && \
+	set -e ; \
+		TEMP_REZ=`mktemp -t` ; \
+		PYTHONPATH=$(CURDIR) testr run --subunit | tee $$TEMP_REZ | subunit2pyunit ; \
+		cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats ; \
 		rm -f $$TEMP_REZ ;
 	testr slowest
 endif
-
-override_dh_gencontrol:
-	if [ `lsb_release -a | grep Release | awk '{print $$2}'` = "7.0" ] ; then \
-		dh_gencontrol -- -T$(CURDIR)/debian/wheezy_deps ; \
-	else \
-		dh_gencontrol ; \
-	fi
