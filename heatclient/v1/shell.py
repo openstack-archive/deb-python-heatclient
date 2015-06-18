@@ -23,6 +23,7 @@ from six.moves.urllib import request
 import yaml
 
 from heatclient.common import deployment_utils
+from heatclient.common import event_utils
 from heatclient.common import template_format
 from heatclient.common import template_utils
 from heatclient.common import utils
@@ -43,48 +44,6 @@ def _authenticated_fetcher(hc):
         return hc.http_client.raw_request(*args, **kwargs).content
 
     return _do
-
-
-@utils.arg('-f', '--template-file', metavar='<FILE>',
-           help=_('Path to the template.'))
-@utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help=_('Path to the environment, it can be specified '
-                  'multiple times.'),
-           action='append')
-@utils.arg('-u', '--template-url', metavar='<URL>',
-           help=_('URL of template.'))
-@utils.arg('-o', '--template-object', metavar='<URL>',
-           help=_('URL to retrieve template object (e.g. from swift).'))
-@utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
-           type=int,
-           help=_('Stack creation timeout in minutes.'
-           ' DEPRECATED use %(arg)s instead.')
-           % {'arg': '--timeout'})
-@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
-           type=int,
-           help=_('Stack creation timeout in minutes.'))
-@utils.arg('-r', '--enable-rollback', default=False, action="store_true",
-           help=_('Enable rollback on create/update failure.'))
-@utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
-           help=_('Parameter values used to create the stack. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
-           action='append')
-@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
-           help=_('Parameter values from file used to create the stack. '
-           'This can be specified multiple times. Parameter value '
-           'would be the content of the file'),
-           action='append')
-@utils.arg('name', metavar='<STACK_NAME>',
-           help=_('Name of the stack to create.'))
-@utils.arg('--pre-create', metavar='<RESOURCE>',
-           default=None, action='append',
-           help=_('Name of a resource to set a pre-create hook to.'))
-def do_create(hc, args):
-    '''DEPRECATED! Use stack-create instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'stack-create'})
-    do_stack_create(hc, args)
 
 
 @utils.arg('-f', '--template-file', metavar='<FILE>',
@@ -320,15 +279,6 @@ def do_stack_preview(hc, args):
 
 @utils.arg('id', metavar='<NAME or ID>', nargs='+',
            help=_('Name or ID of stack(s) to delete.'))
-def do_delete(hc, args):
-    '''DEPRECATED! Use stack-delete instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'stack-delete '})
-    do_stack_delete(hc, args)
-
-
-@utils.arg('id', metavar='<NAME or ID>', nargs='+',
-           help=_('Name or ID of stack(s) to delete.'))
 def do_stack_delete(hc, args):
     '''Delete the stack(s).'''
     failure_count = 0
@@ -418,15 +368,6 @@ def do_action_check(hc, args):
 
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to describe.'))
-def do_describe(hc, args):
-    '''DEPRECATED! Use stack-show instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'stack-show'})
-    do_stack_show(hc, args)
-
-
-@utils.arg('id', metavar='<NAME or ID>',
-           help=_('Name or ID of stack to describe.'))
 def do_stack_show(hc, args):
     '''Describe the stack.'''
     fields = {'stack_id': args.id}
@@ -444,63 +385,6 @@ def do_stack_show(hc, args):
             'links': utils.link_formatter
         }
         utils.print_dict(stack.to_dict(), formatters=formatters)
-
-
-@utils.arg('-f', '--template-file', metavar='<FILE>',
-           help=_('Path to the template.'))
-@utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help=_('Path to the environment, it can be specified '
-                  'multiple times.'),
-           action='append')
-@utils.arg('-u', '--template-url', metavar='<URL>',
-           help=_('URL of template.'))
-@utils.arg('-o', '--template-object', metavar='<URL>',
-           help=_('URL to retrieve template object (e.g. from swift).'))
-@utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
-           type=int,
-           help=_('Stack update timeout in minutes.'))
-@utils.arg('-r', '--enable-rollback', default=False, action="store_true",
-           help=_('DEPRECATED! Use %(arg)s argument instead. '
-                  'Enable rollback on stack update failure. '
-                  'NOTE: default behavior is now to use the rollback value '
-                  'of existing stack.') % {'arg': '--rollback'})
-@utils.arg('--rollback', default=None, metavar='<VALUE>',
-           help=_('Set rollback on update failure. '
-           'Values %(true)s  set rollback to enabled. '
-           'Values %(false)s set rollback to disabled. '
-           'Default is to use the value of existing stack to be updated.')
-           % {'true': strutils.TRUE_STRINGS, 'false': strutils.FALSE_STRINGS})
-@utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
-           help=_('Parameter values used to create the stack. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
-           action='append')
-@utils.arg('-Pf', '--parameter-file', metavar='<KEY=VALUE>',
-           help=_('Parameter values from file used to create the stack. '
-           'This can be specified multiple times. Parameter value '
-           'would be the content of the file'),
-           action='append')
-@utils.arg('-x', '--existing', default=False, action="store_true",
-           help=_('Re-use the set of parameters of the current stack. '
-           'Parameters specified in %(arg)s will patch over the existing '
-           'values in the current stack. Parameters omitted will keep '
-           'the existing values.')
-           % {'arg': '--parameters'})
-@utils.arg('-c', '--clear-parameter', metavar='<PARAMETER>',
-           help=_('Remove the parameters from the set of parameters of '
-           'current stack for the stack-update. The default value in the '
-           'template will be used. This can be specified multiple times.'),
-           action='append')
-@utils.arg('id', metavar='<NAME or ID>',
-           help=_('Name or ID of stack to update.'))
-@utils.arg('--pre-update', metavar='<RESOURCE>',
-           default=None, action='append',
-           help=_('Name of a resource to set a pre-update hook to.'))
-def do_update(hc, args):
-    '''DEPRECATED! Use stack-update instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'stack-update'})
-    do_stack_update(hc, args)
 
 
 @utils.arg('-f', '--template-file', metavar='<FILE>',
@@ -622,17 +506,12 @@ def do_stack_cancel_update(hc, args):
         do_stack_list(hc)
 
 
-def do_list(hc, args):
-    '''DEPRECATED! Use stack-list instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'stack-list'})
-    do_stack_list(hc)
-
-
 @utils.arg('-s', '--show-deleted', default=False, action="store_true",
            help=_('Include soft-deleted stacks in the stack listing.'))
 @utils.arg('-n', '--show-nested', default=False, action="store_true",
            help=_('Include nested stacks in the stack listing.'))
+@utils.arg('-a', '--show-hidden', default=False, action="store_true",
+           help=_('Include hidden stacks in the stack listing.'))
 @utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Filter parameters to apply on returned stacks. '
            'This can be specified multiple times, or once with parameters '
@@ -657,7 +536,8 @@ def do_stack_list(hc, args=None):
                   'marker': args.marker,
                   'filters': utils.format_parameters(args.filters),
                   'global_tenant': args.global_tenant,
-                  'show_deleted': args.show_deleted}
+                  'show_deleted': args.show_deleted,
+                  'show_hidden': args.show_hidden}
         if args.show_nested:
             fields.append('parent')
             kwargs['show_nested'] = True
@@ -754,12 +634,16 @@ def do_resource_type_show(hc, args):
 
 @utils.arg('resource_type', metavar='<RESOURCE_TYPE>',
            help=_('Resource type to generate a template for.'))
+@utils.arg('-t', '--template-type', metavar='<TEMPLATE_TYPE>',
+           default='cfn',
+           help=_('Template type to generate, hot or cfn.'))
 @utils.arg('-F', '--format', metavar='<FORMAT>',
            help=_("The template output format, one of: %s.")
                  % ', '.join(utils.supported_formats.keys()))
 def do_resource_type_template(hc, args):
     '''Generate a template based on a resource type.'''
-    fields = {'resource_type': args.resource_type}
+    fields = {'resource_type': args.resource_type,
+              'template_type': args.template_type}
     try:
         template = hc.resource_types.generate_template(**fields)
     except exc.HTTPNotFound:
@@ -770,15 +654,6 @@ def do_resource_type_template(hc, args):
             print(utils.format_output(template, format=args.format))
         else:
             print(utils.format_output(template))
-
-
-@utils.arg('id', metavar='<NAME or ID>',
-           help=_('Name or ID of stack to get the template for.'))
-def do_gettemplate(hc, args):
-    '''DEPRECATED! Use template-show instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'template-show'})
-    do_template_show(hc, args)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -795,23 +670,6 @@ def do_template_show(hc, args):
             print(yaml.safe_dump(template, indent=2))
         else:
             print(jsonutils.dumps(template, indent=2, ensure_ascii=False))
-
-
-@utils.arg('-u', '--template-url', metavar='<URL>',
-           help=_('URL of template.'))
-@utils.arg('-f', '--template-file', metavar='<FILE>',
-           help=_('Path to the template.'))
-@utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
-           help=_('Path to the environment, it can be specified '
-                  'multiple times.'),
-           action='append')
-@utils.arg('-o', '--template-object', metavar='<URL>',
-           help=_('URL to retrieve template object (e.g. from swift).'))
-def do_validate(hc, args):
-    '''DEPRECATED! Use template-validate instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'template-validate'})
-    do_template_validate(hc, args)
 
 
 @utils.arg('-u', '--template-url', metavar='<URL>',
@@ -877,17 +735,6 @@ def do_resource_list(hc, args):
            help=_('Name or ID of stack to show the resource for.'))
 @utils.arg('resource', metavar='<RESOURCE>',
            help=_('Name of the resource to show the details for.'))
-def do_resource(hc, args):
-    '''DEPRECATED! Use resource-show instead.'''
-    logger.warning(_LW('DEPRECATED! Use %(cmd)s instead.'),
-                   {'cmd': 'resource-show'})
-    do_resource_show(hc, args)
-
-
-@utils.arg('id', metavar='<NAME or ID>',
-           help=_('Name or ID of stack to show the resource for.'))
-@utils.arg('resource', metavar='<RESOURCE>',
-           help=_('Name of the resource to show the details for.'))
 def do_resource_show(hc, args):
     '''Describe the resource.'''
     fields = {'stack_id': args.id,
@@ -909,6 +756,9 @@ def do_resource_show(hc, args):
 
 @utils.arg('resource_type', metavar='<RESOURCE_TYPE>',
            help=_('Resource type to generate a template for.'))
+@utils.arg('-t', '--template-type', metavar='<TEMPLATE_TYPE>',
+           default='cfn',
+           help=_('Template type to generate, hot or cfn.'))
 @utils.arg('-F', '--format', metavar='<FORMAT>',
            help=_("The template output format, one of: %s.")
                  % ', '.join(utils.supported_formats.keys()))
@@ -977,9 +827,9 @@ def do_resource_signal(hc, args):
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of the stack these resources belong to.'))
 @utils.arg('--pre-create', action='store_true', default=False,
-           help=_('Clear the pre-create hooks'))
+           help=_('Clear the pre-create hooks (optional)'))
 @utils.arg('--pre-update', action='store_true', default=False,
-           help=_('Clear the pre-update hooks'))
+           help=_('Clear the pre-update hooks (optional)'))
 @utils.arg('hook', metavar='<RESOURCE>', nargs='+',
            help=_('Resource names with hooks to clear. Resources '
                   'in nested stacks can be set using slash as a separator: '
@@ -988,16 +838,19 @@ def do_resource_signal(hc, args):
                   'nested_stack/an*/*_resource'))
 def do_hook_clear(hc, args):
     '''Clear hooks on a given stack.'''
-    if not (args.pre_create or args.pre_update):
-        raise exc.CommandError(
-            "You must specify at least one hook type (--pre-create, "
-            "--pre-update or both)")
+    if args.pre_create:
+        hook_type = 'pre-create'
+    elif args.pre_update:
+        hook_type = 'pre-update'
+    else:
+        hook_type = _get_hook_type_via_status(hc, args.id)
+
     for hook_string in args.hook:
         hook = [b for b in hook_string.split('/') if b]
         resource_pattern = hook[-1]
         stack_id = args.id
 
-        def clear_hook(stack_id, resource_name, hook_type):
+        def clear_hook(stack_id, resource_name):
             try:
                 hc.resources.signal(
                     stack_id=stack_id,
@@ -1023,10 +876,7 @@ def do_hook_clear(hc, args):
                 for resource in hc.resources.list(stack_id):
                     res_name = resource.resource_name
                     if fnmatch.fnmatchcase(res_name, resource_pattern):
-                        if args.pre_create:
-                            clear_hook(stack_id, res_name, 'pre-create')
-                        if args.pre_update:
-                            clear_hook(stack_id, res_name, 'pre-update')
+                        clear_hook(stack_id, res_name)
 
         clear_wildcard_hooks(stack_id, hook[:-1])
 
@@ -1044,29 +894,117 @@ def do_hook_clear(hc, args):
            help=_('Limit the number of events returned.'))
 @utils.arg('-m', '--marker', metavar='<ID>',
            help=_('Only return events that appear after the given event ID.'))
+@utils.arg('-n', '--nested-depth', metavar='<DEPTH>',
+           help=_('Depth of nested stacks from which to display events. '
+                  'Note this cannot be specified with --resource.'))
 def do_event_list(hc, args):
     '''List events for a stack.'''
-    fields = {'stack_id': args.id,
-              'resource_name': args.resource,
-              'limit': args.limit,
-              'marker': args.marker,
-              'filters': utils.format_parameters(args.filters),
-              'sort_dir': 'asc'}
-    try:
-        events = hc.events.list(**fields)
-    except exc.HTTPNotFound as ex:
-        # it could be the stack or resource that is not found
-        # just use the message that the server sent us.
-        raise exc.CommandError(str(ex))
+    display_fields = ['id', 'resource_status_reason',
+                      'resource_status', 'event_time']
+    event_args = {'resource_name': args.resource,
+                  'limit': args.limit,
+                  'marker': args.marker,
+                  'filters': utils.format_parameters(args.filters),
+                  'sort_dir': 'asc'}
+
+    # Specifying a resource in recursive mode makes no sense..
+    if args.nested_depth and args.resource:
+        msg = _("--nested-depth cannot be specified with --resource")
+        raise exc.CommandError(msg)
+
+    if args.nested_depth:
+        try:
+            nested_depth = int(args.nested_depth)
+        except ValueError:
+            msg = _("--nested-depth invalid value %s") % args.nested_depth
+            raise exc.CommandError(msg)
+        # Until the API supports recursive event listing we'll have to do the
+        # marker/limit filtering client-side
+        del (event_args['marker'])
+        del (event_args['limit'])
+        # Nested list adds the stack name to the output
+        display_fields.append('stack_name')
     else:
-        fields = ['id', 'resource_status_reason',
-                  'resource_status', 'event_time']
-        if len(events) >= 1:
-            if hasattr(events[0], 'resource_name'):
-                fields.insert(0, 'resource_name')
-            else:
-                fields.insert(0, 'logical_resource_id')
-        utils.print_list(events, fields, sortby_index=None)
+        nested_depth = 0
+
+    events = event_utils.get_events(
+        hc, stack_id=args.id, event_args=event_args, nested_depth=nested_depth,
+        marker=args.marker, limit=args.limit)
+
+    if len(events) >= 1:
+        if hasattr(events[0], 'resource_name'):
+            display_fields.insert(0, 'resource_name')
+        else:
+            display_fields.insert(0, 'logical_resource_id')
+
+    utils.print_list(events, display_fields, sortby_index=None)
+
+
+def _get_hook_type_via_status(hc, stack_id):
+    # Figure out if the hook should be pre-create or pre-update based
+    # on the stack status, also sanity assertions that we're in-progress.
+    try:
+        stack = hc.stacks.get(stack_id=stack_id)
+    except exc.HTTPNotFound:
+        raise exc.CommandError(_('Stack not found: %s') % stack_id)
+    else:
+        if 'IN_PROGRESS' not in stack.stack_status:
+            raise exc.CommandError(_('Stack status %s not IN_PROGRESS') %
+                                   stack.stack_status)
+
+    if 'CREATE' in stack.stack_status:
+        hook_type = 'pre-create'
+    elif 'UPDATE' in stack.stack_status:
+        hook_type = 'pre-update'
+    else:
+        raise exc.CommandError(_('Unexpected stack status %s, '
+                                 'only create/update supported')
+                               % stack.stack_status)
+    return hook_type
+
+
+@utils.arg('id', metavar='<NAME or ID>',
+           help=_('Name or ID of stack to show the pending hooks for.'))
+@utils.arg('-n', '--nested-depth', metavar='<DEPTH>',
+           help=_('Depth of nested stacks from which to display hooks.'))
+def do_hook_poll(hc, args):
+    '''List resources with pending hook for a stack.'''
+
+    # There are a few steps to determining if a stack has pending hooks
+    # 1. The stack is IN_PROGRESS status (otherwise, by definition no hooks
+    #    can be pending
+    # 2. There is an event for a resource associated with hitting a hook
+    # 3. There is not an event associated with clearing the hook in step(2)
+    #
+    # So, essentially, this ends up being a specially filtered type of event
+    # listing, because all hook status is exposed via events.  In future
+    # we might consider exposing some more efficient interface via the API
+    # to reduce the expense of this brute-force polling approach
+    display_fields = ['id', 'resource_status_reason',
+                      'resource_status', 'event_time']
+    if args.nested_depth:
+        try:
+            nested_depth = int(args.nested_depth)
+        except ValueError:
+            msg = _("--nested-depth invalid value %s") % args.nested_depth
+            raise exc.CommandError(msg)
+        display_fields.append('stack_name')
+    else:
+        nested_depth = 0
+
+    hook_type = _get_hook_type_via_status(hc, args.id)
+    event_args = {'sort_dir': 'asc'}
+    hook_events = event_utils.get_hook_events(
+        hc, stack_id=args.id, event_args=event_args,
+        nested_depth=nested_depth, hook_type=hook_type)
+
+    if len(hook_events) >= 1:
+        if hasattr(hook_events[0], 'resource_name'):
+            display_fields.insert(0, 'resource_name')
+        else:
+            display_fields.insert(0, 'logical_resource_id')
+
+    utils.print_list(hook_events, display_fields, sortby_index=None)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
