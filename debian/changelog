@@ -1,4 +1,4 @@
-python-heatclient (0.6.0-1) unstable; urgency=medium
+python-heatclient (0.6.0-1) experimental; urgency=medium
 
   * New upstream release.
   * Added Python3 support.
