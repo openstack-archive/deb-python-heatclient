@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "remove" ] ; then
+	update-alternatives --remove heat /usr/bin/python3-heat
+fi
+
+#DEBHELPER#
+
+exit 0
