@@ -28,7 +28,7 @@ ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	testr init
 	set -e ; \
 		TEMP_REZ=`mktemp -t` ; \
-		PYTHONPATH=$(CURDIR) testr run --subunit | tee $$TEMP_REZ | subunit2pyunit ; \
+		PYTHONPATH=$(CURDIR) testr run --subunit 'heatclient\.tests\.(?!.*v1\.test_hooks\.TestHooks.*)' | tee $$TEMP_REZ | subunit2pyunit ; \
 		cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats ; \
 		rm -f $$TEMP_REZ ;
 	testr slowest
