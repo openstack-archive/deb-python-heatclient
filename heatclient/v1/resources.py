@@ -12,8 +12,10 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+from heatclient.common import utils
 
 from oslo_utils import encodeutils
+import six
 from six.moves.urllib import parse
 
 from heatclient.openstack.common.apiclient import base
@@ -35,31 +37,51 @@ class Resource(base.Resource):
     def data(self, **kwargs):
         return self.manager.data(self, **kwargs)
 
+    @property
+    def stack_name(self):
+        if not hasattr(self, 'links'):
+            return
+        for l in self.links:
+            if l['rel'] == 'stack':
+                return l['href'].split('/')[-2]
+
 
 class ResourceManager(stacks.StackChildManager):
     resource_class = Resource
 
-    def list(self, stack_id, nested_depth=0):
+    def list(self, stack_id, **kwargs):
         """Get a list of resources.
         :rtype: list of :class:`Resource`
         """
+        params = {}
+
+        for key, value in six.iteritems(kwargs):
+            if value:
+                params[key] = value
         url = '/stacks/%s/resources' % stack_id
-        if nested_depth:
-            url += '?nested_depth=%s' % nested_depth
+        if params:
+            url += '?%s' % parse.urlencode(params, True)
+
         return self._list(url, "resources")
 
-    def get(self, stack_id, resource_name):
+    def get(self, stack_id, resource_name, with_attr=None):
         """Get the details for a specific resource.
 
         :param stack_id: ID of stack containing the resource
         :param resource_name: ID of resource to get the details for
+        :param with_attr: Attributes to show
         """
         stack_id = self._resolve_stack_id(stack_id)
         url_str = '/stacks/%s/resources/%s' % (
                   parse.quote(stack_id, ''),
                   parse.quote(encodeutils.safe_encode(resource_name), ''))
-        resp, body = self.client.json_request('GET', url_str)
-        return Resource(self, body['resource'])
+        if with_attr:
+            params = {'with_attr': with_attr}
+            url_str += '?%s' % parse.urlencode(params, True)
+
+        resp = self.client.get(url_str)
+        body = utils.get_response_body(resp)
+        return Resource(self, body.get('resource'))
 
     def metadata(self, stack_id, resource_name):
         """Get the metadata for a specific resource.
@@ -71,8 +93,9 @@ class ResourceManager(stacks.StackChildManager):
         url_str = '/stacks/%s/resources/%s/metadata' % (
                   parse.quote(stack_id, ''),
                   parse.quote(encodeutils.safe_encode(resource_name), ''))
-        resp, body = self.client.json_request('GET', url_str)
-        return body['metadata']
+        resp = self.client.get(url_str)
+        body = utils.get_response_body(resp)
+        return body.get('metadata')
 
     def signal(self, stack_id, resource_name, data=None):
         """Signal a specific resource.
@@ -84,7 +107,8 @@ class ResourceManager(stacks.StackChildManager):
         url_str = '/stacks/%s/resources/%s/signal' % (
                   parse.quote(stack_id, ''),
                   parse.quote(encodeutils.safe_encode(resource_name), ''))
-        resp, body = self.client.json_request('POST', url_str, data=data)
+        resp = self.client.post(url_str, data=data)
+        body = utils.get_response_body(resp)
         return body
 
     def generate_template(self, resource_name):
@@ -93,5 +117,6 @@ class ResourceManager(stacks.StackChildManager):
         """
         url_str = '/resource_types/%s/template' % (
                   parse.quote(encodeutils.safe_encode(resource_name), ''))
-        resp, body = self.client.json_request('GET', url_str)
+        resp = self.client.get(url_str)
+        body = utils.get_response_body(resp)
         return body

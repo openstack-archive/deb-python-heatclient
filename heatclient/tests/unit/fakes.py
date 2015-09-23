@@ -17,7 +17,7 @@ from heatclient.common import http
 from heatclient import exc
 
 
-def script_heat_list(url=None, show_nested=False):
+def script_heat_list(url=None, show_nested=False, client=http.HTTPClient):
     if url is None:
         url = '/stacks?'
 
@@ -52,7 +52,10 @@ def script_heat_list(url=None, show_nested=False):
                             'success, you',
                             {'content-type': 'application/json'},
                             jsonutils.dumps(resp_dict))
-    http.HTTPClient.json_request('GET', url).AndReturn((resp, resp_dict))
+    if client == http.SessionClient:
+        client.request(url, 'GET').AndReturn(resp)
+    else:
+        client.json_request('GET', url).AndReturn((resp, resp_dict))
 
 
 def mock_script_heat_list(show_nested=False):
@@ -90,7 +93,84 @@ def mock_script_heat_list(show_nested=False):
     return resp, resp_dict
 
 
-def script_heat_normal_error():
+def mock_script_event_list(
+        stack_name="teststack", resource_name=None,
+        rsrc_eventid1="7fecaeed-d237-4559-93a5-92d5d9111205",
+        rsrc_eventid2="e953547a-18f8-40a7-8e63-4ec4f509648b",
+        action="CREATE", final_state="COMPLETE", fakehttp=True):
+
+    resp_dict = {"events": [
+        {"event_time": "2013-12-05T14:14:31Z",
+         "id": rsrc_eventid1,
+         "links": [{"href": "http://heat.example.com:8004/foo",
+                    "rel": "self"},
+                   {"href": "http://heat.example.com:8004/foo2",
+                    "rel": "resource"},
+                   {"href": "http://heat.example.com:8004/foo3",
+                    "rel": "stack"}],
+         "logical_resource_id": "myDeployment",
+         "physical_resource_id": None,
+         "resource_name": resource_name if resource_name else "testresource",
+         "resource_status": "%s_IN_PROGRESS" % action,
+         "resource_status_reason": "state changed"},
+        {"event_time": "2013-12-05T14:14:32Z",
+         "id": rsrc_eventid2,
+         "links": [{"href": "http://heat.example.com:8004/foo",
+               "rel": "self"},
+              {"href": "http://heat.example.com:8004/foo2",
+               "rel": "resource"},
+              {"href": "http://heat.example.com:8004/foo3",
+               "rel": "stack"}],
+         "logical_resource_id": "myDeployment",
+         "physical_resource_id": "bce15ec4-8919-4a02-8a90-680960fb3731",
+         "resource_name": resource_name if resource_name else "testresource",
+         "resource_status": "%s_%s" % (action, final_state),
+         "resource_status_reason": "state changed"}]}
+
+    if resource_name is None:
+        # if resource_name is not specified,
+        # then request is made for stack events. Hence include the stack event
+        stack_event1 = "0159dccd-65e1-46e8-a094-697d20b009e5"
+        stack_event2 = "8f591a36-7190-4adb-80da-00191fe22388"
+        resp_dict["events"].insert(
+            0, {"event_time": "2013-12-05T14:14:30Z",
+                "id": stack_event1,
+                "links": [{"href": "http://heat.example.com:8004/foo",
+                           "rel": "self"},
+                          {"href": "http://heat.example.com:8004/foo2",
+                           "rel": "resource"},
+                          {"href": "http://heat.example.com:8004/foo3",
+                           "rel": "stack"}],
+                "logical_resource_id": "aResource",
+                "physical_resource_id": None,
+                "resource_name": stack_name,
+                "resource_status": "%s_IN_PROGRESS" % action,
+                "resource_status_reason": "state changed"})
+        resp_dict["events"].append(
+            {"event_time": "2013-12-05T14:14:33Z",
+             "id": stack_event2,
+             "links": [{"href": "http://heat.example.com:8004/foo",
+                        "rel": "self"},
+                       {"href": "http://heat.example.com:8004/foo2",
+                        "rel": "resource"},
+                       {"href": "http://heat.example.com:8004/foo3",
+                        "rel": "stack"}],
+             "logical_resource_id": "aResource",
+             "physical_resource_id": None,
+             "resource_name": stack_name,
+             "resource_status": "%s_%s" % (action, final_state),
+             "resource_status_reason": "state changed"})
+
+    resp = FakeHTTPResponse(
+        200,
+        'OK',
+        {'content-type': 'application/json'},
+        jsonutils.dumps(resp_dict)) if fakehttp else None
+
+    return resp, resp_dict
+
+
+def script_heat_normal_error(client=http.HTTPClient):
     resp_dict = {
         "explanation": "The resource could not be found.",
         "code": 404,
@@ -105,17 +185,23 @@ def script_heat_normal_error():
                             'The resource could not be found',
                             {'content-type': 'application/json'},
                             jsonutils.dumps(resp_dict))
-    http.HTTPClient.json_request('GET', '/stacks/bad').AndRaise(
-        exc.from_response(resp))
+    if client == http.SessionClient:
+        client.request('/stacks/bad', 'GET').AndRaise(exc.from_response(resp))
+    else:
+        client.json_request('GET',
+                            '/stacks/bad').AndRaise(exc.from_response(resp))
 
 
-def script_heat_error(resp_string):
+def script_heat_error(resp_string, client=http.HTTPClient):
     resp = FakeHTTPResponse(400,
                             'The resource could not be found',
                             {'content-type': 'application/json'},
                             resp_string)
-    http.HTTPClient.json_request('GET', '/stacks/bad').AndRaise(
-        exc.from_response(resp))
+    if client == http.SessionClient:
+        client.request('/stacks/bad', 'GET').AndRaise(exc.from_response(resp))
+    else:
+        client.json_request('GET',
+                            '/stacks/bad').AndRaise(exc.from_response(resp))
 
 
 def fake_headers():

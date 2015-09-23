@@ -1,0 +1,16 @@
+heat_template_version: 2015-04-30
+description: A minimal HOT test template
+parameters:
+  test_client_name:
+    description: Client to poll
+    type: string
+  test_wait_secs:
+    description: Seconds to wait after an action (-1 is infinite)
+    type: number
+    default: 0
+resources:
+    test_resource:
+        type: OS::Heat::TestResource
+        properties:
+            client_name: { get_param: test_client_name }
+            wait_secs: { get_param: test_wait_secs }

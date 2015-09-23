@@ -14,13 +14,16 @@
 #    under the License.
 
 import base64
+import logging
 import os
 import textwrap
 import uuid
 
 from oslo_serialization import jsonutils
+from oslo_utils import encodeutils
 from oslo_utils import importutils
 import prettytable
+import six
 from six.moves.urllib import error
 from six.moves.urllib import parse
 from six.moves.urllib import request
@@ -28,7 +31,11 @@ import yaml
 
 from heatclient import exc
 from heatclient.openstack.common._i18n import _
+from heatclient.openstack.common._i18n import _LE
 from heatclient.openstack.common import cliutils
+
+LOG = logging.getLogger(__name__)
+
 
 supported_formats = {
     "json": lambda x: jsonutils.dumps(x, indent=2),
@@ -84,6 +91,58 @@ def print_dict(d, formatters=None):
         else:
             pt.add_row([field, d[field]])
     print(pt.get_string(sortby='Property'))
+
+
+def event_log_formatter(events):
+    """Return the events in log format."""
+    event_log = []
+    log_format = _("%(event_date)s  %(event_time)s  %(event_id)s "
+                   "[%(rsrc_name)s]: %(rsrc_status)s  %(rsrc_status_reason)s")
+    for event in events:
+        event_time = getattr(event, 'event_time', '')
+        time_date = event_time.split('T')
+        try:
+            event_time = time_date[0]
+            event_date = time_date[1][:-1]
+        except IndexError:
+            event_time = event_date = ''
+
+        log = log_format % {
+            'event_date': event_date, 'event_time': event_time,
+            'event_id': getattr(event, 'id', ''),
+            'rsrc_name': getattr(event, 'resource_name', ''),
+            'rsrc_status': getattr(event, 'resource_status', ''),
+            'rsrc_status_reason': getattr(event, 'resource_status_reason', '')
+        }
+        event_log.append(log)
+
+    return "\n".join(event_log)
+
+
+def print_update_list(lst, fields, formatters=None):
+    """Print the stack-update --dry-run output as a table.
+
+    This function is necessary to print the stack-update --dry-run
+    output, which contains additional information about the update.
+    """
+    formatters = formatters or {}
+    pt = prettytable.PrettyTable(fields, caching=False, print_empty=False)
+    pt.align = 'l'
+
+    for change in lst:
+        row = []
+        for field in fields:
+            if field in formatters:
+                row.append(formatters[field](change.get(field, None)))
+            else:
+                row.append(change.get(field, None))
+
+        pt.add_row(row)
+
+    if six.PY3:
+        print(encodeutils.safe_encode(pt.get_string()).decode())
+    else:
+        print(encodeutils.safe_encode(pt.get_string()))
 
 
 def find_resource(manager, name_or_id):
@@ -235,3 +294,15 @@ def normalise_file_path_to_url(path):
         return path
     path = os.path.abspath(path)
     return parse.urljoin('file:', request.pathname2url(path))
+
+
+def get_response_body(resp):
+    body = resp.content
+    if 'application/json' in resp.headers.get('content-type', ''):
+        try:
+            body = resp.json()
+        except ValueError:
+            LOG.error(_LE('Could not decode response body as JSON'))
+    else:
+        body = None
+    return body

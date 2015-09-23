@@ -10,6 +10,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+from heatclient.common import utils
 
 from oslo_utils import encodeutils
 from six.moves.urllib import parse
@@ -30,28 +31,41 @@ class ResourceType(base.Resource):
 
 class ResourceTypeManager(base.BaseManager):
     resource_class = ResourceType
+    KEY = 'resource_types'
 
-    def list(self):
+    def list(self, **kwargs):
         """Get a list of resource types.
         :rtype: list of :class:`ResourceType`
         """
-        return self._list('/resource_types', 'resource_types')
+
+        url = '/%s' % self.KEY
+        params = {}
+        if 'filters' in kwargs:
+            filters = kwargs.pop('filters')
+            params.update(filters)
+            url += '?%s' % parse.urlencode(params, True)
+
+        return self._list(url, self.KEY)
 
     def get(self, resource_type):
         """Get the details for a specific resource_type.
 
         :param resource_type: name of the resource type to get the details for
         """
-        url_str = '/resource_types/%s' % (
+        url_str = '/%s/%s' % (
+                  self.KEY,
                   parse.quote(encodeutils.safe_encode(resource_type), ''))
-        resp, body = self.client.json_request('GET', url_str)
+        resp = self.client.get(url_str)
+        body = utils.get_response_body(resp)
         return body
 
     def generate_template(self, resource_type, template_type='cfn'):
-        url_str = '/resource_types/%s/template' % (
+        url_str = '/%s/%s/template' % (
+                  self.KEY,
                   parse.quote(encodeutils.safe_encode(resource_type), ''))
         if template_type:
             url_str += '?%s' % parse.urlencode(
                 {'template_type': template_type}, True)
-        resp, body = self.client.json_request('GET', url_str)
+        resp = self.client.get(url_str)
+        body = utils.get_response_body(resp)
         return body
