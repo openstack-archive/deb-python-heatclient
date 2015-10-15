@@ -1,6 +1,7 @@
 python-heatclient (0.8.0-2) unstable; urgency=medium
 
   * Uploading to unstable.
+  * Do not run Python 3.5 unit tests.
 
  -- Thomas Goirand <zigo@debian.org>  Thu, 15 Oct 2015 21:52:21 +0000
 
