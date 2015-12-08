@@ -41,13 +41,14 @@ class TestHooks(testtools.TestCase):
         type(self.args).rollback = mock.PropertyMock(return_value=None)
         type(self.args).pre_create = mock.PropertyMock(return_value=False)
         type(self.args).pre_update = mock.PropertyMock(return_value=False)
+        type(self.args).poll = mock.PropertyMock(return_value=None)
 
     def test_create_hooks_in_args(self):
         type(self.args).pre_create = mock.PropertyMock(
             return_value=['bp', 'another_bp'])
 
         shell.do_stack_create(self.client, self.args)
-        self.client.stacks.create.assert_called_once()
+        self.assertEqual(1, self.client.stacks.create.call_count)
         expected_hooks = {
             'bp': {'hooks': 'pre-create'},
             'another_bp': {'hooks': 'pre-create'}
@@ -61,7 +62,7 @@ class TestHooks(testtools.TestCase):
             return_value=['nested/bp', 'super/nested/bp'])
 
         shell.do_stack_create(self.client, self.args)
-        self.client.stacks.create.assert_called_once()
+        self.assertEqual(1, self.client.stacks.create.call_count)
         expected_hooks = {
             'nested': {
                 'bp': {'hooks': 'pre-create'},
@@ -103,7 +104,7 @@ class TestHooks(testtools.TestCase):
             mock.Mock(return_value=({}, env))
 
         shell.do_stack_create(self.client, self.args)
-        self.client.stacks.create.assert_called_once()
+        self.assertEqual(1, self.client.stacks.create.call_count)
         actual_hooks = self.client.stacks.create.call_args[1][
             'environment']['resource_registry']['resources']
         expected_hooks = {
@@ -135,7 +136,7 @@ class TestHooks(testtools.TestCase):
             return_value=['bp', 'another_bp'])
 
         shell.do_stack_update(self.client, self.args)
-        self.client.stacks.update.assert_called_once()
+        self.assertEqual(1, self.client.stacks.update.call_count)
         expected_hooks = {
             'bp': {'hooks': 'pre-update'},
             'another_bp': {'hooks': 'pre-update'},
@@ -149,7 +150,7 @@ class TestHooks(testtools.TestCase):
             return_value=['nested/bp', 'super/nested/bp'])
 
         shell.do_stack_update(self.client, self.args)
-        self.client.stacks.update.assert_called_once()
+        self.assertEqual(1, self.client.stacks.update.call_count)
         expected_hooks = {
             'nested': {
                 'bp': {'hooks': 'pre-update'}
@@ -191,7 +192,7 @@ class TestHooks(testtools.TestCase):
             mock.Mock(return_value=({}, env))
 
         shell.do_stack_update(self.client, self.args)
-        self.client.stacks.update.assert_called_once()
+        self.assertEqual(1, self.client.stacks.update.call_count)
         actual_hooks = self.client.stacks.update.call_args[1][
             'environment']['resource_registry']['resources']
         expected_hooks = {

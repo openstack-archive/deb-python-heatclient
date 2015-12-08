@@ -11,8 +11,10 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+from heatclient.common import utils
 
 from heatclient.v1 import resources
+from six.moves.urllib import parse
 
 from mox3 import mox
 import testtools
@@ -24,7 +26,6 @@ class ResourceManagerTest(testtools.TestCase):
         super(ResourceManagerTest, self).setUp()
         self.m = mox.Mox()
         self.addCleanup(self.m.UnsetStubs)
-        self.addCleanup(self.m.ResetAll)
 
     def _base_test(self, expect, key):
 
@@ -39,8 +40,30 @@ class ResourceManagerTest(testtools.TestCase):
                 ret = key and {key: []} or {}
                 return {}, {key: ret}
 
+            def raw_request(self, *args, **kwargs):
+                assert args == expect
+                return {}
+
+            def head(self, url, **kwargs):
+                return self.json_request("HEAD", url, **kwargs)
+
+            def post(self, url, **kwargs):
+                return self.json_request("POST", url, **kwargs)
+
+            def put(self, url, **kwargs):
+                return self.json_request("PUT", url, **kwargs)
+
+            def delete(self, url, **kwargs):
+                return self.raw_request("DELETE", url, **kwargs)
+
+            def patch(self, url, **kwargs):
+                return self.json_request("PATCH", url, **kwargs)
+
         manager = resources.ResourceManager(FakeAPI())
         self.m.StubOutWithMock(manager, '_resolve_stack_id')
+        self.m.StubOutWithMock(utils, 'get_response_body')
+        utils.get_response_body(mox.IgnoreArg()).AndReturn(
+            {key: key and {key: []} or {}})
         manager._resolve_stack_id('teststack').AndReturn('teststack/abcd1234')
         self.m.ReplayAll()
 
@@ -56,6 +79,20 @@ class ResourceManagerTest(testtools.TestCase):
 
         manager = self._base_test(expect, key)
         manager.get(**fields)
+        self.m.VerifyAll()
+
+    def test_get_with_attr(self):
+        fields = {'stack_id': 'teststack',
+                  'resource_name': 'testresource',
+                  'with_attr': ['attr_a', 'attr_b']}
+        expect = ('GET',
+                  '/stacks/teststack%2Fabcd1234/resources'
+                  '/testresource?with_attr=attr_a&with_attr=attr_b')
+        key = 'resource'
+
+        manager = self._base_test(expect, key)
+        manager.get(**fields)
+        self.m.VerifyAll()
 
     def test_get_with_unicode_resource_name(self):
         fields = {'stack_id': 'teststack',
@@ -67,31 +104,30 @@ class ResourceManagerTest(testtools.TestCase):
 
         manager = self._base_test(expect, key)
         manager.get(**fields)
+        self.m.VerifyAll()
 
     def test_list(self):
-        fields = {'stack_id': 'teststack'}
-        expect = ('/stacks/teststack/resources')
-        key = 'resources'
-
-        class FakeResponse(object):
-            def json(self):
-                return {key: {}}
-
-        class FakeClient(object):
-            def get(self, *args, **kwargs):
-                assert args[0] == expect
-                return FakeResponse()
-
-        manager = resources.ResourceManager(FakeClient())
-        self.m.StubOutWithMock(manager, '_resolve_stack_id')
-        manager._resolve_stack_id('teststack').AndReturn('teststack/abcd1234')
-        self.m.ReplayAll()
-
-        manager.list(**fields)
+        self._test_list(
+            fields={'stack_id': 'teststack'},
+            expect='/stacks/teststack/resources')
 
     def test_list_nested(self):
-        fields = {'stack_id': 'teststack', 'nested_depth': '99'}
-        expect = ('/stacks/teststack/resources?nested_depth=99')
+        self._test_list(
+            fields={'stack_id': 'teststack', 'nested_depth': '99'},
+            expect='/stacks/teststack/resources?%s' % parse.urlencode({
+                'nested_depth': 99,
+            }, True)
+        )
+
+    def test_list_detail(self):
+        self._test_list(
+            fields={'stack_id': 'teststack', 'with_detail': 'True'},
+            expect='/stacks/teststack/resources?%s' % parse.urlencode({
+                'with_detail': True,
+            }, True)
+        )
+
+    def _test_list(self, fields, expect):
         key = 'resources'
 
         class FakeResponse(object):
@@ -104,10 +140,6 @@ class ResourceManagerTest(testtools.TestCase):
                 return FakeResponse()
 
         manager = resources.ResourceManager(FakeClient())
-        self.m.StubOutWithMock(manager, '_resolve_stack_id')
-        manager._resolve_stack_id('teststack').AndReturn('teststack/abcd1234')
-        self.m.ReplayAll()
-
         manager.list(**fields)
 
     def test_metadata(self):
@@ -120,14 +152,32 @@ class ResourceManagerTest(testtools.TestCase):
 
         manager = self._base_test(expect, key)
         manager.metadata(**fields)
+        self.m.VerifyAll()
 
     def test_generate_template(self):
         fields = {'resource_name': 'testresource'}
         expect = ('GET', '/resource_types/testresource/template')
         key = None
 
-        manager = self._base_test(expect, key)
+        class FakeAPI(object):
+            """Fake API and ensure request url is correct."""
+
+            def get(self, *args, **kwargs):
+                assert ('GET', args[0]) == expect
+
+            def json_request(self, *args, **kwargs):
+                assert args == expect
+                ret = key and {key: []} or {}
+                return {}, {key: ret}
+
+        manager = resources.ResourceManager(FakeAPI())
+        self.m.StubOutWithMock(utils, 'get_response_body')
+        utils.get_response_body(mox.IgnoreArg()).AndReturn(
+            {key: key and {key: []} or {}})
+        self.m.ReplayAll()
+
         manager.generate_template(**fields)
+        self.m.VerifyAll()
 
     def test_signal(self):
         fields = {'stack_id': 'teststack',
@@ -140,3 +190,21 @@ class ResourceManagerTest(testtools.TestCase):
 
         manager = self._base_test(expect, key)
         manager.signal(**fields)
+        self.m.VerifyAll()
+
+
+class ResourceStackNameTest(testtools.TestCase):
+
+    def test_stack_name(self):
+        resource = resources.Resource(None, {"links": [{
+            "href": "http://heat.example.com:8004/foo/12/resources/foobar",
+            "rel": "self"
+        }, {
+            "href": "http://heat.example.com:8004/foo/12",
+            "rel": "stack"
+        }]})
+        self.assertEqual('foo', resource.stack_name)
+
+    def test_stack_name_no_links(self):
+        resource = resources.Resource(None, {})
+        self.assertIsNone(resource.stack_name)

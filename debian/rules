@@ -22,6 +22,8 @@ override_dh_auto_install:
 	mv $(CURDIR)/debian/python3-heatclient/usr/bin/heat $(CURDIR)/debian/python3-heatclient/usr/bin/python3-heat
 	rm -f $(CURDIR)/debian/python*/usr/lib/python*/dist-packages/*.pth
 
+override_dh_python3:
+	dh_python3 --shebang=/usr/bin/python3
 
 override_dh_auto_clean:
 	dh_auto_clean
@@ -33,7 +35,7 @@ override_dh_install:
 
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	set -e ; for i in 2.7 $(PYTHON3S) ; do \
+	set -e ; for i in 2.7 3.4 ; do \
 		PYMAJOR=`echo $$i | cut -d'.' -f1` ; \
 		echo "===> Testing with python$$i (python$$PYMAJOR)" ; \
 		rm -rf .testrepository ; \

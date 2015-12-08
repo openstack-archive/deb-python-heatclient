@@ -1,3 +1,24 @@
+python-heatclient (0.8.0-3) unstable; urgency=medium
+
+  * override_dh_python3 to fix Py3 shebang.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 23 Oct 2015 22:32:10 +0000
+
+python-heatclient (0.8.0-2) unstable; urgency=medium
+
+  * Uploading to unstable.
+  * Do not run Python 3.5 unit tests.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 15 Oct 2015 21:52:21 +0000
+
+python-heatclient (0.8.0-1) experimental; urgency=medium
+
+  * New upstream release.
+  * d/control: Align (build-)depends with upstream.
+  * d/control: Update uploaders.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 23 Sep 2015 16:38:15 -0400
+
 python-heatclient (0.6.0-1) experimental; urgency=medium
 
   * New upstream release.

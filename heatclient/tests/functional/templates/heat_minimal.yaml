@@ -1,0 +1,16 @@
+HeatTemplateFormatVersion: '2012-12-12'
+Description: Minimal template to test validation
+Parameters:
+  ClientName:
+    Description: Client to poll
+    Type: String
+  WaitSecs:
+    Description: Seconds to wait after an action (-1 is infinite)
+    Type: Number
+    Default: 0
+Resources:
+  TestResource:
+    Type: OS::Heat::TestResource
+    Properties:
+      client_name: {Ref: ClientName}
+      wait_secs: {Ref: WaitSecs}
