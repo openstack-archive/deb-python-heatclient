@@ -1,3 +1,9 @@
+python-heatclient (0.9.0-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+
+ -- David Della Vecchia <ddv@canonical.com>  Mon, 22 Feb 2016 17:04:05 -0500
+
 python-heatclient (0.8.0-3) unstable; urgency=medium
 
   * override_dh_python3 to fix Py3 shebang.
