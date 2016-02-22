@@ -144,6 +144,12 @@ class ShellTest(testtools.TestCase):
         self.assertEqual(u'{\n  "Uni": "test\u2665"\n}',
                          utils.json_formatter({"Uni": u"test\u2665"}))
 
+    def test_yaml_formatter(self):
+        self.assertEqual('null\n...\n', utils.yaml_formatter(None))
+        self.assertEqual('{}\n', utils.yaml_formatter({}))
+        self.assertEqual('foo: bar\n',
+                         utils.yaml_formatter({"foo": "bar"}))
+
     def test_text_wrap_formatter(self):
         self.assertEqual('', utils.text_wrap_formatter(None))
         self.assertEqual('', utils.text_wrap_formatter(''))
@@ -160,6 +166,27 @@ class ShellTest(testtools.TestCase):
         self.assertEqual('', utils.newline_list_formatter([]))
         self.assertEqual('one\ntwo',
                          utils.newline_list_formatter(['one', 'two']))
+
+    def test_event_log_formatter(self):
+        event1 = {'event_time': '2015-09-28T12:12:12',
+                  'id': '123456789',
+                  'resource_name': 'res_name',
+                  'resource_status': 'CREATE_IN_PROGRESS',
+                  'resource_status_reason': 'CREATE started'}
+        event2 = {'event_time': '2015-09-28T12:12:22',
+                  'id': '123456789',
+                  'resource_name': 'res_name',
+                  'resource_status': 'CREATE_COMPLETE',
+                  'resource_status_reason': 'CREATE completed'}
+        events_list = [hc_res.Resource(manager=None, info=event1),
+                       hc_res.Resource(manager=None, info=event2)]
+
+        expected = ('2015-09-28 12:12:12 [res_name]: '
+                    'CREATE_IN_PROGRESS  CREATE started\n'
+                    '2015-09-28 12:12:22 [res_name]: '
+                    'CREATE_COMPLETE  CREATE completed')
+        self.assertEqual(expected, utils.event_log_formatter(events_list))
+        self.assertEqual('', utils.event_log_formatter([]))
 
 
 class ShellTestParameterFiles(testtools.TestCase):

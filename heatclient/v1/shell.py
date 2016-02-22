@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 
 
 def _authenticated_fetcher(hc):
-    """A wrapper around the heat client object to fetch a template.
-    """
+    """A wrapper around the heat client object to fetch a template."""
+
     def _do(*args, **kwargs):
         if isinstance(hc.http_client, http.SessionClient):
             method, url = args
@@ -72,8 +72,8 @@ def _authenticated_fetcher(hc):
            help=_('URL to retrieve template object (e.g. from swift).'))
 @utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
            type=int,
-           help=_('Stack creation timeout in minutes.'
-           '  DEPRECATED use %(arg)s instead.')
+           help=_('Stack creation timeout in minutes. '
+                  'DEPRECATED use %(arg)s instead.')
            % {'arg': '--timeout'})
 @utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
            type=int,
@@ -82,13 +82,13 @@ def _authenticated_fetcher(hc):
            help=_('Enable rollback on create/update failure.'))
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Parameter values used to create the stack. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon.'),
            action='append')
 @utils.arg('-Pf', '--parameter-file', metavar='<KEY=FILE>',
            help=_('Parameter values from file used to create the stack. '
-           'This can be specified multiple times. Parameter value '
-           'would be the content of the file'),
+                  'This can be specified multiple times. Parameter value '
+                  'would be the content of the file'),
            action='append')
 @utils.arg('--poll', metavar='SECONDS', type=int, nargs='?', const=5,
            help=_('Poll and report events until stack completes. '
@@ -113,11 +113,10 @@ def do_stack_create(hc, args):
                            'please use %(arg2)s instead'),
                        {
                            'arg1': '-c/--create-timeout',
-                           'arg2': '-t/--timeout'
-                       })
+                           'arg2': '-t/--timeout'})
 
     if args.pre_create:
-        hooks_to_env(env, args.pre_create, 'pre-create')
+        template_utils.hooks_to_env(env, args.pre_create, 'pre-create')
 
     fields = {
         'stack_name': args.name,
@@ -140,32 +139,7 @@ def do_stack_create(hc, args):
     hc.stacks.create(**fields)
     do_stack_list(hc)
     if args.poll is not None:
-        _poll_for_events(hc, args.name, 'CREATE', poll_period=args.poll)
-
-
-def hooks_to_env(env, arg_hooks, hook):
-    '''Add hooks from args to environment's resource_registry section.
-
-    Hooks are either "resource_name" (if it's a top-level resource) or
-    "nested_stack/resource_name" (if the resource is in a nested stack).
-
-    The environment expects each hook to be associated with the resource
-    within `resource_registry/resources` using the `hooks: pre-create` format.
-
-    '''
-    if 'resource_registry' not in env:
-        env['resource_registry'] = {}
-    if 'resources' not in env['resource_registry']:
-        env['resource_registry']['resources'] = {}
-    for hook_declaration in arg_hooks:
-        hook_path = [r for r in hook_declaration.split('/') if r]
-        resources = env['resource_registry']['resources']
-        for nested_stack in hook_path:
-            if nested_stack not in resources:
-                resources[nested_stack] = {}
-            resources = resources[nested_stack]
-        else:
-            resources['hooks'] = hook
+        _poll_for_events(hc, args.name, 'CREATE', args.poll)
 
 
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
@@ -174,8 +148,8 @@ def hooks_to_env(env, arg_hooks, hook):
            action='append')
 @utils.arg('-c', '--create-timeout', metavar='<TIMEOUT>',
            type=int,
-           help=_('Stack creation timeout in minutes.'
-           '  DEPRECATED use %(arg)s instead.')
+           help=_('Stack creation timeout in minutes. '
+                  'DEPRECATED use %(arg)s instead.')
            % {'arg': '--timeout'})
 @utils.arg('-t', '--timeout', metavar='<TIMEOUT>',
            type=int,
@@ -185,16 +159,16 @@ def hooks_to_env(env, arg_hooks, hook):
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
            help=_('Enable rollback on create/update failure.'))
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
-           help=_('Parameter values used to create the stack. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
+           help=_('Parameter values used to create the stack. This can be '
+                  'specified multiple times, or once with parameters '
+                  'separated by a semicolon.'),
            action='append')
 @utils.arg('name', metavar='<STACK_NAME>',
            help=_('Name of the stack to adopt.'))
 def do_stack_adopt(hc, args):
     '''Adopt a stack.'''
-    env_files, env = template_utils.process_environment_and_files(
-        env_path=args.environment_file)
+    env_files, env = template_utils.process_multiple_environments_and_files(
+        env_paths=args.environment_file)
 
     if not args.adopt_file:
         raise exc.CommandError(_('Need to specify %(arg)s') %
@@ -208,8 +182,7 @@ def do_stack_adopt(hc, args):
                            'please use %(arg2)s instead'),
                        {
                            'arg1': '-c/--create-timeout',
-                           'arg2': '-t/--timeout'
-                       })
+                           'arg2': '-t/--timeout'})
 
     fields = {
         'stack_name': args.name,
@@ -239,21 +212,21 @@ def do_stack_adopt(hc, args):
 @utils.arg('-o', '--template-object', metavar='<URL>',
            help=_('URL to retrieve template object (e.g. from swift)'))
 @utils.arg('-t', '--timeout', metavar='<TIMEOUT>', type=int,
-           help=_('Stack creation timeout in minutes. This is only used during'
-           'validation in preview.'))
+           help=_('Stack creation timeout in minutes. This is only used '
+                  'during validation in preview.'))
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
-           help=_('Enable rollback on failure. This option is not used during'
-           'preview and exists only for symmetry with %(cmd)s.')
+           help=_('Enable rollback on failure. This option is not used during '
+                  'preview and exists only for symmetry with %(cmd)s.')
            % {'cmd': 'stack-create'})
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Parameter values used to preview the stack. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by semicolon.'),
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by semicolon.'),
            action='append')
 @utils.arg('-Pf', '--parameter-file', metavar='<KEY=FILE>',
            help=_('Parameter values from file used to create the stack. '
-           'This can be specified multiple times. Parameter value '
-           'would be the content of the file'),
+                  'This can be specified multiple times. Parameter value '
+                  'would be the content of the file'),
            action='append')
 @utils.arg('name', metavar='<STACK_NAME>',
            help=_('Name of the stack to preview.'))
@@ -319,8 +292,8 @@ def do_stack_delete(hc, args):
 
 @utils.arg('-O', '--output-file', metavar='<FILE>',
            help=_('file to output abandon result. '
-           'If the option is specified, the result will be'
-           ' output into <FILE>.'))
+                  'If the option is specified, the result will be '
+                  'output into <FILE>.'))
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to abandon.'))
 def do_stack_abandon(hc, args):
@@ -389,9 +362,12 @@ def do_action_check(hc, args):
 
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to describe.'))
+@utils.arg('--no-resolve-outputs', action="store_true",
+           help='Do not resolve outputs of the stack.')
 def do_stack_show(hc, args):
     '''Describe the stack.'''
-    fields = {'stack_id': args.id}
+    fields = {'stack_id': args.id,
+              'resolve_outputs': not args.no_resolve_outputs}
     _do_stack_show(hc, fields)
 
 
@@ -418,42 +394,44 @@ def do_stack_show(hc, args):
            help=_('Stack update timeout in minutes.'))
 @utils.arg('-r', '--enable-rollback', default=False, action="store_true",
            help=_('DEPRECATED! Use %(arg)s argument instead. '
-           'Enable rollback on stack update failure. '
-           'NOTE: default behavior is now to use the rollback value '
-           'of existing stack.')
+                  'Enable rollback on stack update failure. '
+                  'NOTE: default behavior is now to use the rollback value '
+                  'of existing stack.')
            % {'arg': '--rollback'})
 @utils.arg('--rollback', default=None, metavar='<VALUE>',
            help=_('Set rollback on update failure. '
-           'Values %(true)s  set rollback to enabled. '
-           'Values %(false)s set rollback to disabled. '
-           'Default is to use the value of existing stack to be updated.')
+                  'Values %(true)s  set rollback to enabled. '
+                  'Values %(false)s set rollback to disabled. '
+                  'Default is to use the value of existing stack to be '
+                  'updated.')
            % {'true': strutils.TRUE_STRINGS, 'false': strutils.FALSE_STRINGS})
 @utils.arg('-y', '--dry-run', default=False, action="store_true",
            help='Do not actually perform the stack update, but show what '
            'would be changed')
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Parameter values used to create the stack. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon.'),
            action='append')
 @utils.arg('-Pf', '--parameter-file', metavar='<KEY=FILE>',
            help=_('Parameter values from file used to create the stack. '
-           'This can be specified multiple times. Parameter value '
-           'would be the content of the file'),
+                  'This can be specified multiple times. Parameter value '
+                  'would be the content of the file'),
            action='append')
 @utils.arg('-x', '--existing', default=False, action="store_true",
            help=_('Re-use the template, parameters and environment of the '
-           'current stack. If the template argument is omitted then the '
-           'existing template is used. If no %(env_arg)s is specified then '
-           'the existing environment is used. '
-           'Parameters specified in %(arg)s will patch over the existing '
-           'values in the current stack. Parameters omitted will keep '
-           'the existing values.')
+                  'current stack. If the template argument is omitted then '
+                  'the existing template is used. If no %(env_arg)s is '
+                  'specified then the existing environment is used. '
+                  'Parameters specified in %(arg)s will patch over the '
+                  'existing values in the current stack. Parameters omitted '
+                  'will keep the existing values.')
            % {'arg': '--parameters', 'env_arg': '--environment-file'})
 @utils.arg('-c', '--clear-parameter', metavar='<PARAMETER>',
            help=_('Remove the parameters from the set of parameters of '
-           'current stack for the %(cmd)s. The default value in the '
-           'template will be used. This can be specified multiple times.')
+                  'current stack for the %(cmd)s. The default value in the '
+                  'template will be used. This can be specified multiple '
+                  'times.')
            % {'cmd': 'stack-update'},
            action='append')
 @utils.arg('id', metavar='<NAME or ID>',
@@ -474,7 +452,7 @@ def do_stack_update(hc, args):
         env_paths=args.environment_file)
 
     if args.pre_update:
-        hooks_to_env(env, args.pre_update, 'pre-update')
+        template_utils.hooks_to_env(env, args.pre_update, 'pre-update')
 
     fields = {
         'stack_id': args.id,
@@ -554,8 +532,8 @@ def do_stack_cancel_update(hc, args):
            help=_('Include hidden stacks in the stack listing.'))
 @utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Filter parameters to apply on returned stacks. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon.'),
            action='append')
 @utils.arg('-t', '--tags', metavar='<TAG1,TAG2...>',
            help=_('Show stacks containing these tags, combine multiple tags '
@@ -573,7 +551,7 @@ def do_stack_cancel_update(hc, args):
            help=_('Limit the number of stacks returned.'))
 @utils.arg('-m', '--marker', metavar='<ID>',
            help=_('Only return stacks that appear after the given stack ID.'))
-@utils.arg('-k', '--sort-keys', metavar='<KEY1,KEY2...>',
+@utils.arg('-k', '--sort-keys', metavar='<KEY1;KEY2...>',
            help=_('List of keys for sorting the returned stacks. '
                   'This can be specified multiple times or once with keys '
                   'separated by semicolons. Valid sorting keys include '
@@ -647,70 +625,102 @@ def do_stack_list(hc, args=None):
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to query.'))
 def do_output_list(hc, args):
-    '''Show available outputs.'''
+    """Show available outputs."""
     try:
-        stack = hc.stacks.get(stack_id=args.id)
+        outputs = hc.stacks.output_list(args.id)
     except exc.HTTPNotFound:
-        raise exc.CommandError(_('Stack not found: %s') % args.id)
-    else:
-        outputs = stack.to_dict()['outputs']
-        fields = ['output_key', 'description']
-        formatters = {
-            'output_key': lambda x: x['output_key'],
-            'description': lambda x: x['description'],
-        }
+        try:
+            outputs = hc.stacks.get(args.id).to_dict()
+        except exc.HTTPNotFound:
+            raise exc.CommandError(_('Stack not found: %s') % args.id)
 
-        utils.print_list(outputs, fields, formatters=formatters)
+    fields = ['output_key', 'description']
+    formatters = {
+        'output_key': lambda x: x['output_key'],
+        'description': lambda x: x['description'],
+    }
+
+    utils.print_list(outputs['outputs'], fields, formatters=formatters)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to query.'))
 @utils.arg('output', metavar='<OUTPUT NAME>', nargs='?', default=None,
            help=_('Name of an output to display.'))
+@utils.arg('-F', '--format', metavar='<FORMAT>',
+           help=_('The output value format, one of: json, raw.'),
+           default='json')
 @utils.arg('-a', '--all', default=False, action='store_true',
            help=_('Display all stack outputs.'))
-@utils.arg('-F', '--format', metavar='<FORMAT>',
-           help=_('The output value format, one of: json, raw'),
-           default='json')
+@utils.arg('-v', '--only-value', default=False, action="store_true",
+           help=_('Returns only output value in specified format.'))
 def do_output_show(hc, args):
-    '''Show a specific stack output.'''
-    if (not args.all and args.output is None or
-            args.all and args.output is not None):
-        raise exc.CommandError(
-            _('Error: either %(output)s or %(all)s argument is needed.')
-            % {'output': '<OUTPUT NAME>', 'all': '--all'})
-    try:
-        stack = hc.stacks.get(stack_id=args.id)
-    except exc.HTTPNotFound:
-        raise exc.CommandError(_('Stack not found: %s') % args.id)
-    else:
-        if args.all:
-            print(utils.json_formatter(stack.to_dict().get('outputs', [])))
-        else:
-            for output in stack.to_dict().get('outputs', []):
-                if output['output_key'] == args.output:
-                    if 'output_error' in output:
-                        msg = _("Error: %s") % output['output_error']
-                        raise exc.CommandError(msg)
-                    else:
-                        value = output['output_value']
-                    break
-            else:
-                return
+    """Show a specific stack output."""
+    def resolve_output(output_key):
+        try:
+            output = hc.stacks.output_show(args.id, output_key)
+        except exc.HTTPNotFound:
+            try:
+                output = None
+                stack = hc.stacks.get(args.id).to_dict()
+                for o in stack.get('outputs', []):
+                    if o['output_key'] == output_key:
+                        output = {'output': o}
+                        break
+                if output is None:
+                    raise exc.CommandError(_('Output %(key)s not found.') % {
+                        'key': args.output})
+            except exc.HTTPNotFound:
+                raise exc.CommandError(
+                    _('Stack %(id)s or output %(key)s not found.') % {
+                        'id': args.id,
+                        'key': args.output})
+        return output
 
+    def show_output(output):
+        if 'output_error' in output['output']:
+            msg = _("Output error: %s") % output['output']['output_error']
+            raise exc.CommandError(msg)
+        if args.only_value:
             if (args.format == 'json'
-                    or isinstance(value, dict)
-                    or isinstance(value, list)):
-                print(utils.json_formatter(value))
+                    or isinstance(output['output']['output_value'], dict)
+                    or isinstance(output['output']['output_value'], list)):
+                print(
+                    utils.json_formatter(output['output']['output_value']))
             else:
-                print(value)
+                print(output['output']['output_value'])
+        else:
+            formatters = {
+                'output_value': (lambda x: utils.json_formatter(x)
+                                 if args.format == 'json'
+                                 else x)
+            }
+            utils.print_dict(output['output'], formatters=formatters)
+
+    if args.all:
+        try:
+            outputs = hc.stacks.output_list(args.id)
+            resolved = False
+        except exc.HTTPNotFound:
+            try:
+                outputs = hc.stacks.get(args.id).to_dict()
+                resolved = True
+            except exc.HTTPNotFound:
+                raise exc.CommandError(_('Stack not found: %s') % args.id)
+        for output in outputs['outputs']:
+            if resolved:
+                show_output({'output': output})
+            else:
+                show_output(resolve_output(output['output_key']))
+    else:
+        show_output(resolve_output(args.output))
 
 
 @utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Filter parameters to apply on returned resource types. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon. It can be any of name, version and '
-           'support_status'),
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon. It can be any of '
+                  'name, version and support_status'),
            action='append')
 def do_resource_type_list(hc, args):
     '''List the available resource types.'''
@@ -784,8 +794,13 @@ def do_template_show(hc, args):
            help=_('URL to retrieve template object (e.g. from swift).'))
 @utils.arg('-n', '--show-nested', default=False, action="store_true",
            help=_('Resolve parameters from nested templates as well.'))
+@utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
+           help=_('Parameter values for the template. '
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon.'),
+           action='append')
 def do_template_validate(hc, args):
-    '''Validate a template with parameters.'''
+    """Validate a template with parameters."""
 
     tpl_files, template = template_utils.get_template_contents(
         args.template_file,
@@ -797,6 +812,7 @@ def do_template_validate(hc, args):
         env_paths=args.environment_file)
     fields = {
         'template': template,
+        'parameters': utils.format_parameters(args.parameters),
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env,
     }
@@ -1002,8 +1018,8 @@ def do_hook_clear(hc, args):
            help=_('Name of the resource to filter events by.'))
 @utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Filter parameters to apply on returned events. '
-           'This can be specified multiple times, or once with parameters '
-           'separated by a semicolon.'),
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon.'),
            action='append')
 @utils.arg('-l', '--limit', metavar='<LIMIT>',
            help=_('Limit the number of events returned.'))
@@ -1168,7 +1184,7 @@ def do_event_show(hc, args):
 
 @utils.arg('-f', '--definition-file', metavar='<FILE or URL>',
            help=_('Path to JSON/YAML containing map defining '
-           '<inputs>, <outputs>, and <options>.'))
+                  '<inputs>, <outputs>, and <options>.'))
 @utils.arg('-c', '--config-file', metavar='<FILE or URL>',
            help=_('Path to configuration script/data.'))
 @utils.arg('-g', '--group', metavar='<GROUP_NAME>', default='Heat::Ungrouped',
@@ -1214,6 +1230,22 @@ def do_config_create(hc, args):
 
     sc = hc.software_configs.create(**config)
     print(jsonutils.dumps(sc.to_dict(), indent=2))
+
+
+@utils.arg('-l', '--limit', metavar='<LIMIT>',
+           help=_('Limit the number of configs returned.'))
+@utils.arg('-m', '--marker', metavar='<ID>',
+           help=_('Return configs that appear after the given config ID.'))
+def do_config_list(hc, args):
+    '''List software configs.'''
+    kwargs = {}
+    if args.limit:
+        kwargs['limit'] = args.limit
+    if args.marker:
+        kwargs['marker'] = args.marker
+    scs = hc.software_configs.list(**kwargs)
+    fields = ['id', 'name', 'group', 'creation_time']
+    utils.print_list(scs, fields, sortby_index=None)
 
 
 @utils.arg('id', metavar='<ID>',
@@ -1347,15 +1379,28 @@ def do_deployment_metadata_show(hc, args):
 @utils.arg('id', metavar='<ID>', nargs='+',
            help=_('IDs of the deployments to delete.'))
 def do_deployment_delete(hc, args):
-    '''Delete a software deployment.'''
+    '''Delete software deployments.'''
     failure_count = 0
 
     for deploy_id in args.id:
         try:
+            sd = hc.software_deployments.get(deployment_id=deploy_id)
             hc.software_deployments.delete(deployment_id=deploy_id)
-        except exc.HTTPNotFound as e:
+        except Exception as e:
+            if isinstance(e, exc.HTTPNotFound):
+                print(_('Deployment with ID %s not found') % deploy_id)
             failure_count += 1
-            print(e)
+            continue
+
+        # just try best to delete the corresponding config
+        try:
+            config_id = getattr(sd, 'config_id')
+            hc.software_configs.delete(config_id=config_id)
+        except Exception:
+            print(_('Failed to delete the correlative config '
+                    '%(config_id)s of deployment %(deploy_id)s') %
+                  {'config_id': config_id, 'deploy_id': deploy_id})
+
     if failure_count == len(args.id):
         raise exc.CommandError(_("Unable to delete any of the specified "
                                  "deployments."))
@@ -1536,9 +1581,8 @@ def _do_stack_show(hc, fields):
 
 
 def _poll_for_events(hc, stack_name, action, poll_period):
-    """When an action is performed on a stack, continuously poll for its
-    events and display to user as logs.
-    """
+    """Continuously poll events and logs for performed action on stack."""
+
     fields = {'stack_id': stack_name}
     _do_stack_show(hc, fields)
     marker = None

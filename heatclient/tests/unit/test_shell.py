@@ -14,7 +14,6 @@
 import fixtures
 import os
 from oslotest import mockpatch
-import re
 import requests
 import six
 from six.moves.urllib import parse
@@ -90,31 +89,11 @@ class TestCase(testtools.TestCase):
             self.useFixture(
                 fixtures.EnvironmentVariable(key, fake_env.get(key)))
 
-    # required for testing with Python 2.6
-    def assertRegexpMatches(self, text, expected_regexp, msg=None):
-        """Fail the test unless the text matches the regular expression."""
-        if isinstance(expected_regexp, six.string_types):
-            expected_regexp = re.compile(expected_regexp)
-        if not expected_regexp.search(text):
-            msg = msg or "Regexp didn't match"
-            msg = '%s: %r not found in %r' % (
-                msg, expected_regexp.pattern, text)
-            raise self.failureException(msg)
-
-    # required for testing with Python 2.6
-    def assertNotRegexpMatches(self, text, expected_regexp, msg=None):
-        try:
-            self.assertRegexpMatches(text, expected_regexp, msg)
-        except self.failureException:
-            pass
-        else:
-            raise self.failureException(msg)
-
-    def shell_error(self, argstr, error_match):
+    def shell_error(self, argstr, error_match, exception):
         orig = sys.stderr
         sys.stderr = six.StringIO()
         _shell = heatclient.shell.HeatShell()
-        e = self.assertRaises(Exception, _shell.main, argstr.split())
+        e = self.assertRaises(exception, _shell.main, argstr.split())
         self.assertRegexpMatches(e.__str__(), error_match)
         err = sys.stderr.getvalue()
         sys.stderr.close()
@@ -181,7 +160,7 @@ class EnvVarTest(TestCase):
         }
         fake_env[self.remove] = None
         self.set_fake_env(fake_env)
-        self.shell_error('stack-list', self.err)
+        self.shell_error('stack-list', self.err, exception=exc.CommandError)
 
 
 class EnvVarTestToken(TestCase):
@@ -204,7 +183,7 @@ class EnvVarTestToken(TestCase):
         }
         fake_env[self.remove] = None
         self.set_fake_env(fake_env)
-        self.shell_error('stack-list', self.err)
+        self.shell_error('stack-list', self.err, exception=exc.CommandError)
 
 
 class ShellParamValidationTest(TestCase):
@@ -249,7 +228,7 @@ class ShellParamValidationTest(TestCase):
             template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
             cmd = '%s --template-file=%s ' % (self.command, template_file)
 
-        self.shell_error(cmd, self.err)
+        self.shell_error(cmd, self.err, exception=exc.CommandError)
 
 
 class ShellValidationTest(TestCase):
@@ -269,7 +248,7 @@ class ShellValidationTest(TestCase):
 
         self.m.ReplayAll()
         self.set_fake_env(FAKE_ENV_KEYSTONE_V2)
-        self.shell_error('stack-list', failed_msg)
+        self.shell_error('stack-list', failed_msg, exception=exc.Unauthorized)
 
     def test_stack_create_validation(self):
         self.register_keystone_auth_fixture()
@@ -279,7 +258,8 @@ class ShellValidationTest(TestCase):
             '--parameters="InstanceType=m1.large;DBUsername=wp;'
             'DBPassword=verybadpassword;KeyName=heat_key;'
             'LinuxDistribution=F17"',
-            'Need to specify exactly one of')
+            'Need to specify exactly one of',
+            exception=exc.CommandError)
 
     def test_stack_create_with_paramfile_validation(self):
         self.register_keystone_auth_fixture()
@@ -290,7 +270,8 @@ class ShellValidationTest(TestCase):
             '--parameters="InstanceType=m1.large;DBUsername=wp;'
             'DBPassword=verybadpassword;KeyName=heat_key;'
             'LinuxDistribution=F17"',
-            'Need to specify exactly one of')
+            'Need to specify exactly one of',
+            exception=exc.CommandError)
 
     def test_stack_create_validation_keystone_v3(self):
         self.register_keystone_auth_fixture()
@@ -300,7 +281,9 @@ class ShellValidationTest(TestCase):
             '--parameters="InstanceType=m1.large;DBUsername=wp;'
             'DBPassword=verybadpassword;KeyName=heat_key;'
             'LinuxDistribution=F17"',
-            'Need to specify exactly one of')
+            'Need to specify exactly one of',
+            exception=exc.CommandError
+        )
 
 
 class ShellBase(TestCase):
@@ -389,7 +372,8 @@ class ShellTestNoMox(TestCase):
         template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
 
         self.shell_error('stack-create -f %s stack' % template_file,
-                         'The Parameter \(key_name\) was not provided.')
+                         'The Parameter \(key_name\) was not provided.',
+                         exception=exc.HTTPBadRequest)
 
     def test_event_list(self):
         eventid1 = uuid.uuid4().hex
@@ -425,8 +409,8 @@ class ShellTestNoMox(TestCase):
             eventid2,
             'state changed',
             'CREATE_IN_PROGRESS',
-            '2013-12-05T14:14:31Z',
-            '2013-12-05T14:14:32Z',
+            '2013-12-05T14:14:31',
+            '2013-12-05T14:14:32',
         ]
 
         for r in required:
@@ -800,32 +784,100 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(list_text, r)
 
-    def _output_fake_response(self):
-
+    def test_stack_show_without_outputs(self):
+        self.register_keystone_auth_fixture()
         resp_dict = {"stack": {
             "id": "1",
             "stack_name": "teststack",
             "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z",
-            "outputs": [
-                {
-                    "output_value": "value1",
-                    "output_key": "output1",
-                    "description": "test output 1",
-                },
-                {
-                    "output_value": ["output", "value", "2"],
-                    "output_key": "output2",
-                    "description": "test output 2",
-                },
-                {
-                    "output_value": u"test\u2665",
-                    "output_key": "output_uni",
-                    "description": "test output unicode",
-                },
-            ],
             "creation_time": "2012-10-25T01:58:47Z"
         }}
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(resp_dict))
+        params = {'resolve_outputs': False}
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1',
+                'GET', params=params).AndReturn(resp)
+        else:
+            self.client.json_request(
+                'GET', '/stacks/teststack/1', params=params
+            ).AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+
+        list_text = self.shell(
+            'stack-show teststack/1 --no-resolve-outputs')
+
+        required = [
+            'id',
+            'stack_name',
+            'stack_status',
+            'creation_time',
+            'teststack',
+            'CREATE_COMPLETE',
+            '2012-10-25T01:58:47Z'
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def _output_fake_response(self, output_key):
+
+        outputs = [
+            {
+                "output_value": "value1",
+                "output_key": "output1",
+                "description": "test output 1",
+            },
+            {
+                "output_value": ["output", "value", "2"],
+                "output_key": "output2",
+                "description": "test output 2",
+            },
+            {
+                "output_value": u"test\u2665",
+                "output_key": "output_uni",
+                "description": "test output unicode",
+            },
+        ]
+
+        def find_output(key):
+            for out in outputs:
+                if out['output_key'] == key:
+                    return {'output': out}
+
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(find_output(output_key)))
+
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1/outputs/%s' % output_key,
+                'GET').AndReturn(resp)
+        else:
+            self.client.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs/%s' % output_key).AndReturn(
+                    (resp, find_output(output_key)))
+
+        self.m.ReplayAll()
+
+    def _error_output_fake_response(self, output_key):
+
+        resp_dict = {
+            "output": {
+                "output_value": "null",
+                "output_key": "output1",
+                "description": "test output 1",
+                "output_error": "The Referenced Attribute (0 PublicIP) "
+                                "is incorrect."
+            }
+        }
 
         resp = fakes.FakeHTTPResponse(
             200,
@@ -835,102 +887,15 @@ class ShellTestUserPass(ShellBase):
 
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack/1', 'GET').MultipleTimes().AndReturn(
-                    resp)
+                '/stacks/teststack/1/outputs/%s' % output_key,
+                'GET').AndReturn(resp)
         else:
             self.client.json_request(
-                'GET', '/stacks/teststack/1').MultipleTimes().AndReturn(
-                    (resp, resp_dict))
+                'GET',
+                '/stacks/teststack/1/outputs/%s' % output_key).AndReturn(
+                (resp, resp_dict))
 
         self.m.ReplayAll()
-
-    def _error_output_fake_response(self):
-
-        resp_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z",
-            "outputs": [
-                {
-                    "output_value": "null",
-                    "output_key": "output1",
-                    "description": "test output 1",
-                    "output_error": "The Referenced Attribute (0 PublicIP) "
-                                    "is incorrect."
-                },
-            ],
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
-        resp = fakes.FakeHTTPResponse(
-            200,
-            'OK',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(resp_dict))
-
-        if self.client == http.SessionClient:
-            self.client.request(
-                '/stacks/teststack/1', 'GET').AndReturn(resp)
-        else:
-            self.client.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((resp, resp_dict))
-
-        self.m.ReplayAll()
-
-    def test_output_list(self):
-        self.register_keystone_auth_fixture()
-        self._output_fake_response()
-        list_text = self.shell('output-list teststack/1')
-        for r in ['output1', 'output2', 'output_uni']:
-            self.assertRegexpMatches(list_text, r)
-
-    def test_output_show(self):
-        self.register_keystone_auth_fixture()
-
-        self._output_fake_response()
-        list_text = self.shell('output-show teststack/1 output1')
-        self.assertEqual('"value1"\n', list_text)
-
-        list_text = self.shell('output-show  -F raw teststack/1 output1')
-        self.assertEqual('value1\n', list_text)
-
-        list_text = self.shell('output-show  -F raw teststack/1 output2')
-        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
-                         list_text)
-
-        list_text = self.shell('output-show  -F json teststack/1 output2')
-        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
-                         list_text)
-
-    def test_output_show_unicode(self):
-        self.register_keystone_auth_fixture()
-        self._output_fake_response()
-        list_text = self.shell('output-show teststack/1 output_uni')
-        self.assertEqual(u'"test\u2665"\n', list_text)
-
-    def test_output_show_all(self):
-        self.register_keystone_auth_fixture()
-        self._output_fake_response()
-        list_text = self.shell('output-show teststack/1 --all')
-        for r in ['output1', 'value1', 'output2', 'test output unicode']:
-            self.assertRegexpMatches(list_text, r)
-
-    def test_output_show_missing_arg(self):
-        self.register_keystone_auth_fixture()
-        error = self.assertRaises(
-            exc.CommandError, self.shell, 'output-show teststack/1')
-        self.assertIn('either <OUTPUT NAME> or --all argument is needed.',
-                      str(error))
-
-    def test_output_show_error(self):
-        self.register_keystone_auth_fixture()
-        self._error_output_fake_response()
-        error = self.assertRaises(
-            exc.CommandError, self.shell,
-            'output-show teststack/1 output1')
-        self.assertIn('The Referenced Attribute (0 PublicIP) is incorrect.',
-                      str(error))
 
     def test_template_show_cfn(self):
         self.register_keystone_auth_fixture()
@@ -1026,6 +991,42 @@ class ShellTestUserPass(ShellBase):
             "outputs: {}",
             "parameters: {}",
             "resources: {}"
+        ]
+        for r in required:
+            self.assertRegexpMatches(show_text, r)
+
+    def test_template_validate(self):
+        self.register_keystone_auth_fixture()
+        resp_dict = {"heat_template_version": "2013-05-23",
+                     "parameters": {},
+                     "resources": {},
+                     "outputs": {}}
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(resp_dict))
+        if self.client == http.SessionClient:
+            self.client.request('/validate',
+                                'POST',
+                                data=mox.IgnoreArg()
+                                ).AndReturn(resp)
+        else:
+            self.client.json_request('POST',
+                                     '/validate',
+                                     data=mox.IgnoreArg()
+                                     ).AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        cmd = 'template-validate -f %s -P foo=bar' % template_file
+        show_text = self.shell(cmd)
+        required = [
+            'heat_template_version',
+            'outputs',
+            'parameters',
+            'resources'
         ]
         for r in required:
             self.assertRegexpMatches(show_text, r)
@@ -1220,13 +1221,13 @@ class ShellTestUserPass(ShellBase):
             '2',
             'teststack2',
             'IN_PROGRESS',
-            '14:14:30',  '2013-12-05', '0159dccd-65e1-46e8-a094-697d20b009e5',
+            '14:14:30', '2013-12-05',
             'CREATE_IN_PROGRESS', 'state changed',
-            '14:14:31', '7fecaeed-d237-4559-93a5-92d5d9111205',
+            '14:14:31',
             'testresource',
-            '14:14:32', 'e953547a-18f8-40a7-8e63-4ec4f509648b',
+            '14:14:32',
             'CREATE_COMPLETE',
-            '14:14:33', '8f591a36-7190-4adb-80da-00191fe22388'
+            '14:14:33',
         ]
 
         for r in required:
@@ -1684,13 +1685,6 @@ class ShellTestUserPass(ShellBase):
     def test_stack_abandon(self):
         self.register_keystone_auth_fixture()
 
-        resp_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
         abandoned_stack = {
             "action": "CREATE",
             "status": "COMPLETE",
@@ -1708,11 +1702,6 @@ class ShellTestUserPass(ShellBase):
             }
         }
 
-        resp = fakes.FakeHTTPResponse(
-            200,
-            'OK',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(resp_dict))
         abandoned_resp = fakes.FakeHTTPResponse(
             200,
             'OK',
@@ -1720,13 +1709,9 @@ class ShellTestUserPass(ShellBase):
             jsonutils.dumps(abandoned_stack))
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack/1', 'GET').AndReturn(resp)
-            self.client.request(
                 '/stacks/teststack/1/abandon',
                 'DELETE').AndReturn(abandoned_resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((resp, resp_dict))
             http.HTTPClient.raw_request(
                 'DELETE', '/stacks/teststack/1/abandon').AndReturn(
                     abandoned_resp)
@@ -1738,13 +1723,6 @@ class ShellTestUserPass(ShellBase):
     def test_stack_abandon_with_outputfile(self):
         self.register_keystone_auth_fixture()
 
-        resp_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
         abandoned_stack = {
             "action": "CREATE",
             "status": "COMPLETE",
@@ -1762,11 +1740,6 @@ class ShellTestUserPass(ShellBase):
             }
         }
 
-        resp = fakes.FakeHTTPResponse(
-            200,
-            'OK',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(resp_dict))
         abandoned_resp = fakes.FakeHTTPResponse(
             200,
             'OK',
@@ -1774,13 +1747,9 @@ class ShellTestUserPass(ShellBase):
             jsonutils.dumps(abandoned_stack))
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack/1', 'GET').AndReturn(resp)
-            self.client.request(
                 '/stacks/teststack/1/abandon',
                 'DELETE').AndReturn(abandoned_resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((resp, resp_dict))
             http.HTTPClient.raw_request(
                 'DELETE', '/stacks/teststack/1/abandon').AndReturn(
                     abandoned_resp)
@@ -1834,11 +1803,43 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(adopt_text, r)
 
+    def test_stack_adopt_with_environment(self):
+        self.register_keystone_auth_fixture()
+        resp = fakes.FakeHTTPResponse(
+            201,
+            'Created',
+            {'location': 'http://no.where/v1/tenant_id/stacks/teststack/1'},
+            None)
+        if self.client is http.HTTPClient:
+            headers = {'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
+        else:
+            headers = {}
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks', 'POST', data=mox.IgnoreArg(),
+                headers=headers).AndReturn(resp)
+        else:
+            self.client.json_request(
+                'POST', '/stacks', data=mox.IgnoreArg(),
+                headers=headers
+            ).AndReturn((resp, None))
+
+        fakes.script_heat_list(client=self.client)
+        self.m.ReplayAll()
+
+        adopt_data_file = os.path.join(TEST_VAR_DIR, 'adopt_stack_data.json')
+        environment_file = os.path.join(TEST_VAR_DIR, 'environment.json')
+        self.shell(
+            'stack-adopt teststack '
+            '--adopt-file=%s '
+            '--environment-file=%s' % (adopt_data_file, environment_file))
+
     def test_stack_adopt_without_data(self):
         self.register_keystone_auth_fixture()
         failed_msg = 'Need to specify --adopt-file'
         self.m.ReplayAll()
-        self.shell_error('stack-adopt teststack ', failed_msg)
+        self.shell_error('stack-adopt teststack ', failed_msg,
+                         exception=exc.CommandError)
 
     def test_stack_update_enable_rollback(self):
         self.register_keystone_auth_fixture()
@@ -1952,7 +1953,8 @@ class ShellTestUserPass(ShellBase):
         self.shell_error('stack-update teststack2/2 '
                          '--rollback Foo '
                          '--template-file=%s' % template_file,
-                         "Unrecognized value 'Foo', acceptable values are:"
+                         "Unrecognized value 'Foo', acceptable values are:",
+                         exception=exc.CommandError
                          )
 
     def test_stack_update_rollback_default(self):
@@ -2315,28 +2317,9 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(update_text, r)
 
-    def test_stack_update_dry_run(self):
+    def _setup_stubs_update_dry_run(self, template_file, existing=False):
         self.register_keystone_auth_fixture()
 
-        resp_dict = {"stack": {
-            "id": "2",
-            "stack_name": "teststack2",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-        resp = fakes.FakeHTTPResponse(
-            200,
-            'OK',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(resp_dict))
-        if self.client == http.SessionClient:
-            self.client.request(
-                '/stacks/teststack2/2', 'GET').AndReturn(resp)
-        else:
-            self.client.json_request(
-                'GET', '/stacks/teststack2/2').AndReturn((resp, resp_dict))
-
-        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
         template_data = open(template_file).read()
 
         replaced_res = {"resource_name": "my_res",
@@ -2375,22 +2358,50 @@ class ShellTestUserPass(ShellBase):
             'environment': {},
             'template': jsonutils.loads(template_data),
             'parameters': {'"KeyPairName': 'updated_key"'},
-            'disable_rollback': False,
-            'existing': True}
+            'disable_rollback': False}
+
+        if existing is True:
+            method = 'PATCH'
+        else:
+            method = 'PUT'
 
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack2/2/preview', 'PUT',
+                '/stacks/teststack2/2/preview', method,
                 data=expected_data, headers={}).AndReturn(resp)
         else:
             http.HTTPClient.json_request(
-                'PUT', '/stacks/teststack2/2/preview',
+                method, '/stacks/teststack2/2/preview',
                 data=expected_data,
                 headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
             ).AndReturn((resp, None))
 
         self.m.ReplayAll()
 
+    def test_stack_update_dry_run(self):
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        self._setup_stubs_update_dry_run(template_file)
+        update_preview_text = self.shell(
+            'stack-update teststack2/2 '
+            '--template-file=%s '
+            '--enable-rollback '
+            '--parameters="KeyPairName=updated_key" '
+            '--dry-run ' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack2',
+            '2',
+            'state',
+            'replaced'
+        ]
+        for r in required:
+            self.assertRegexpMatches(update_preview_text, r)
+
+    def test_stack_update_dry_run_patch(self):
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        self._setup_stubs_update_dry_run(template_file, existing=True)
         update_preview_text = self.shell(
             'stack-update teststack2/2 '
             '--template-file=%s '
@@ -2504,13 +2515,6 @@ class ShellTestUserPass(ShellBase):
     def test_stack_snapshot(self):
         self.register_keystone_auth_fixture()
 
-        stack_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
         resp_dict = {"snapshot": {
             "id": "1",
             "creation_time": "2012-10-25T01:58:47Z"
@@ -2522,24 +2526,11 @@ class ShellTestUserPass(ShellBase):
             {'content-type': 'application/json'},
             jsonutils.dumps(resp_dict))
         if self.client == http.SessionClient:
-            self.client.request('/stacks/teststack/1', 'GET').AndReturn(
-                fakes.FakeHTTPResponse(
-                    200,
-                    'OK',
-                    {'content-type': 'application/json'},
-                    jsonutils.dumps(stack_dict)))
             self.client.request(
                 '/stacks/teststack/1/snapshots',
                 'POST',
                 data={}).AndReturn(resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn(
-                    (fakes.FakeHTTPResponse(
-                        200,
-                        'OK',
-                        {'content-type': 'application/json'},
-                        jsonutils.dumps(stack_dict)), stack_dict))
             http.HTTPClient.json_request(
                 'POST',
                 '/stacks/teststack/1/snapshots',
@@ -2552,13 +2543,6 @@ class ShellTestUserPass(ShellBase):
     def test_snapshot_list(self):
         self.register_keystone_auth_fixture()
 
-        stack_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
         resp_dict = {"snapshots": [{
             "id": "2",
             "name": "snap1",
@@ -2567,11 +2551,6 @@ class ShellTestUserPass(ShellBase):
             "creation_time": "2014-12-05T01:25:52Z"
         }]}
 
-        stack_resp = fakes.FakeHTTPResponse(
-            200,
-            'OK',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(stack_dict))
         resp = fakes.FakeHTTPResponse(
             200,
             'OK',
@@ -2579,15 +2558,9 @@ class ShellTestUserPass(ShellBase):
             jsonutils.dumps(resp_dict))
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack/1',
-                'GET').AndReturn(stack_resp)
-            self.client.request(
                 '/stacks/teststack/1/snapshots',
                 'GET').AndReturn(resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((stack_resp,
-                                                         stack_dict))
             http.HTTPClient.json_request(
                 'GET',
                 '/stacks/teststack/1/snapshots').AndReturn((resp, resp_dict))
@@ -2611,13 +2584,6 @@ class ShellTestUserPass(ShellBase):
     def test_snapshot_show(self):
         self.register_keystone_auth_fixture()
 
-        stack_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
         resp_dict = {"snapshot": {
             "id": "2",
             "creation_time": "2012-10-25T01:58:47Z"
@@ -2629,23 +2595,10 @@ class ShellTestUserPass(ShellBase):
             {'content-type': 'application/json'},
             jsonutils.dumps(resp_dict))
         if self.client == http.SessionClient:
-            self.client.request('/stacks/teststack/1', 'GET').AndReturn(
-                fakes.FakeHTTPResponse(
-                    200,
-                    'OK',
-                    {'content-type': 'application/json'},
-                    jsonutils.dumps(stack_dict)))
             self.client.request(
                 '/stacks/teststack/1/snapshots/2',
                 'GET').AndReturn(resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((
-                    fakes.FakeHTTPResponse(
-                        200,
-                        'OK',
-                        {'content-type': 'application/json'},
-                        jsonutils.dumps(stack_dict)), stack_dict))
             http.HTTPClient.json_request(
                 'GET',
                 '/stacks/teststack/1/snapshots/2').AndReturn((resp, resp_dict))
@@ -2657,23 +2610,11 @@ class ShellTestUserPass(ShellBase):
     def test_snapshot_delete(self):
         self.register_keystone_auth_fixture()
 
-        stack_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
         resp_dict = {"snapshot": {
             "id": "2",
             "creation_time": "2012-10-25T01:58:47Z"
         }}
 
-        resp = fakes.FakeHTTPResponse(
-            204,
-            'No Content',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(stack_dict))
         second_resp = fakes.FakeHTTPResponse(
             204,
             'No Content',
@@ -2681,13 +2622,9 @@ class ShellTestUserPass(ShellBase):
             jsonutils.dumps(resp_dict))
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack/1', 'GET').AndReturn(resp)
-            self.client.request(
                 '/stacks/teststack/1/snapshots/2',
                 'DELETE').AndReturn(second_resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((resp, stack_dict))
             http.HTTPClient.raw_request(
                 'DELETE',
                 '/stacks/teststack/1/snapshots/2').AndReturn(second_resp)
@@ -2699,18 +2636,6 @@ class ShellTestUserPass(ShellBase):
     def test_stack_restore(self):
         self.register_keystone_auth_fixture()
 
-        stack_dict = {"stack": {
-            "id": "1",
-            "stack_name": "teststack",
-            "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
-        }}
-
-        stack_resp = fakes.FakeHTTPResponse(
-            204,
-            'No Content',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(stack_dict))
         no_resp = fakes.FakeHTTPResponse(
             204,
             'No Content',
@@ -2718,14 +2643,9 @@ class ShellTestUserPass(ShellBase):
             jsonutils.dumps({}))
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack/1', 'GET').AndReturn(stack_resp)
-            self.client.request(
                 '/stacks/teststack/1/snapshots/2/restore',
                 'POST').AndReturn(no_resp)
         else:
-            http.HTTPClient.json_request(
-                'GET', '/stacks/teststack/1').AndReturn((stack_resp,
-                                                         stack_dict))
             http.HTTPClient.json_request(
                 'POST',
                 '/stacks/teststack/1/snapshots/2/restore').AndReturn((no_resp,
@@ -2734,6 +2654,340 @@ class ShellTestUserPass(ShellBase):
         self.m.ReplayAll()
         resp = self.shell('stack-restore teststack/1 2')
         self.assertEqual("", resp)
+
+    def test_output_list(self):
+        self.register_keystone_auth_fixture()
+
+        resp_dict = {"outputs": [{
+            "output_key": "key",
+            "description": "description"
+        },
+            {
+                "output_key": "key1",
+                "description": "description1"
+            }]}
+
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(resp_dict))
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1/outputs',
+                'GET').AndReturn(resp)
+        else:
+            http.HTTPClient.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs').AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+        list_text = self.shell('output-list teststack/1')
+
+        required = [
+            'output_key',
+            'description',
+            'key',
+            'description',
+            'key1',
+            'description1'
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def test_output_list_api_400_error(self):
+        self.register_keystone_auth_fixture()
+        outputs = [{
+            "output_key": "key",
+            "description": "description"
+        },
+            {
+                "output_key": "key1",
+                "description": "description1"
+            }]
+        stack_dict = {"stack": {
+            "id": "1",
+            "stack_name": "teststack",
+            "stack_status": 'CREATE_COMPLETE',
+            "creation_time": "2012-10-25T01:58:47Z",
+            "outputs": outputs
+        }}
+
+        stack_resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(stack_dict))
+        resp = fakes.FakeHTTPResponse(
+            404,
+            'Not Found',
+            {'content-type': 'application/json'},
+            jsonutils.dumps({}))
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1/outputs',
+                'GET').AndRaise(exc.from_response(resp))
+            self.client.request(
+                '/stacks/teststack/1',
+                'GET').AndReturn(stack_resp)
+        else:
+            http.HTTPClient.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs').AndRaise(
+                    exc.from_response(resp))
+            http.HTTPClient.json_request(
+                'GET', '/stacks/teststack/1').AndReturn((stack_resp,
+                                                         stack_dict))
+
+        self.m.ReplayAll()
+        list_text = self.shell('output-list teststack/1')
+
+        required = [
+            'output_key',
+            'description',
+            'key',
+            'description',
+            'key1',
+            'description1'
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def test_output_show_all(self):
+        self.register_keystone_auth_fixture()
+
+        resp_dict = {'outputs': [
+            {
+                'output_key': 'key',
+                'description': 'description'
+            }
+        ]}
+
+        resp_dict1 = {"output": {
+            "output_key": "key",
+            "output_value": "value",
+            'description': 'description'
+        }}
+
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(resp_dict))
+
+        resp1 = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(resp_dict1))
+
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1/outputs',
+                'GET').AndReturn(resp)
+            self.client.request(
+                '/stacks/teststack/1/outputs/key',
+                'GET').AndReturn(resp1)
+        else:
+            http.HTTPClient.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs').AndReturn((resp, resp_dict))
+            http.HTTPClient.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs/key').AndReturn((resp1,
+                                                              resp_dict1))
+
+        self.m.ReplayAll()
+        list_text = self.shell('output-show teststack/1 key --all')
+        required = [
+            'output_key',
+            'output_value',
+            'description',
+            'key',
+            'value',
+            'description',
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def test_output_show(self):
+        self.register_keystone_auth_fixture()
+
+        resp_dict = {"output": {
+            "output_key": "key",
+            "output_value": "value",
+            'description': 'description'
+        }}
+
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            jsonutils.dumps(resp_dict))
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1/outputs/key',
+                'GET').AndReturn(resp)
+        else:
+            http.HTTPClient.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs/key').AndReturn((resp, resp_dict))
+
+        self.m.ReplayAll()
+        resp = self.shell('output-show teststack/1 key')
+        required = [
+            'output_key',
+            'output_value',
+            'description',
+            'key',
+            'value',
+            'description',
+        ]
+        for r in required:
+            self.assertRegexpMatches(resp, r)
+
+    def test_output_show_api_400_error(self):
+        self.register_keystone_auth_fixture()
+        output = {
+            "output_key": "key",
+            "output_value": "value",
+            'description': 'description'
+        }
+        stack_dict = {"stack": {
+            "id": "1",
+            "stack_name": "teststack",
+            "stack_status": 'CREATE_COMPLETE',
+            "creation_time": "2012-10-25T01:58:47Z",
+            'outputs': [output]
+        }}
+
+        resp = fakes.FakeHTTPResponse(
+            404,
+            'Internal Error',
+            {'content-type': 'application/json'},
+            jsonutils.dumps({}))
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack/1/outputs/key',
+                'GET').AndRaise(exc.from_response(resp))
+            self.client.request('/stacks/teststack/1', 'GET').AndReturn(
+                fakes.FakeHTTPResponse(
+                    200,
+                    'OK',
+                    {'content-type': 'application/json'},
+                    jsonutils.dumps(stack_dict)))
+        else:
+            http.HTTPClient.json_request(
+                'GET',
+                '/stacks/teststack/1/outputs/key').AndRaise(
+                    exc.from_response(resp))
+            http.HTTPClient.json_request(
+                'GET', '/stacks/teststack/1').AndReturn((
+                    fakes.FakeHTTPResponse(
+                        200,
+                        'OK',
+                        {'content-type': 'application/json'},
+                        jsonutils.dumps(stack_dict)), stack_dict))
+
+        self.m.ReplayAll()
+        resp = self.shell('output-show teststack/1 key')
+        required = [
+            'output_key',
+            'output_value',
+            'description',
+            'key',
+            'value',
+            'description',
+        ]
+        for r in required:
+            self.assertRegexpMatches(resp, r)
+
+    def test_output_show_output1(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output1')
+        list_text = self.shell('output-show teststack/1 output1')
+        required = [
+            'output_key',
+            'output_value',
+            'description',
+            'output1',
+            'value1',
+            'test output 1',
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def test_output_show_output1_only_value(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output1')
+        list_text = self.shell('output-show -v -F raw teststack/1 output1')
+        self.assertEqual('value1\n', list_text)
+
+    def test_output_show_output2_raw_only_value(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output2')
+        list_text = self.shell('output-show -F raw -v teststack/1 output2')
+        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
+                         list_text)
+
+    def test_output_show_output2_raw(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output2')
+        list_text = self.shell('output-show -F raw teststack/1 output2')
+        required = [
+            'output_key',
+            'output_value',
+            'description',
+            'output2',
+            "[u'output', u'value', u'2']",
+            'test output 2',
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def test_output_show_output2_json_only_value(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output2')
+        list_text = self.shell('output-show -F json -v teststack/1 output2')
+        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
+                         list_text)
+
+    def test_output_show_output2_json(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output2')
+        list_text = self.shell('output-show -F json teststack/1 output2')
+        required = [
+            'output_key',
+            'output_value',
+            'description',
+            'output2',
+            '[\n    "output", \n    "value", \n    "2"\n  ]'
+            'test output 2',
+        ]
+        for r in required:
+            self.assertRegexpMatches(list_text, r)
+
+    def test_output_show_unicode_output_only_value(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output_uni')
+        list_text = self.shell('output-show -v teststack/1 output_uni')
+        self.assertEqual(u'"test\u2665"\n', list_text)
+
+    def test_output_show_error(self):
+        self.register_keystone_auth_fixture()
+        self._error_output_fake_response('output1')
+        error = self.assertRaises(
+            exc.CommandError, self.shell,
+            'output-show teststack/1 output1')
+        self.assertIn('The Referenced Attribute (0 PublicIP) is incorrect.',
+                      six.text_type(error))
 
 
 class ShellTestActions(ShellBase):
@@ -2923,8 +3177,8 @@ class ShellTestEvents(ShellBase):
             'state changed',
             'CREATE_IN_PROGRESS',
             'CREATE_COMPLETE',
-            '2013-12-05T14:14:31Z',
-            '2013-12-05T14:14:32Z',
+            '2013-12-05T14:14:31',
+            '2013-12-05T14:14:32',
         ]
         for r in required:
             self.assertRegexpMatches(event_list_text, r)
@@ -2953,10 +3207,10 @@ class ShellTestEvents(ShellBase):
         event_list_text = self.shell('event-list {0} --format log'.format(
             stack_id))
 
-        expected = '14:14:31  2013-12-05  %s [aResource]: ' \
-                   'CREATE_IN_PROGRESS  state changed\n' \
-                   '14:14:32  2013-12-05  %s [aResource]: CREATE_COMPLETE  ' \
-                   'state changed\n' % (self.event_id_one, self.event_id_two)
+        expected = ('2013-12-05 14:14:31 [aResource]: '
+                    'CREATE_IN_PROGRESS  state changed\n'
+                    '2013-12-05 14:14:32 [aResource]: CREATE_COMPLETE  '
+                    'state changed\n')
 
         self.assertEqual(expected, event_list_text)
 
@@ -4212,21 +4466,53 @@ class ShellTestDeployment(ShellBase):
     def test_deploy_delete(self):
         self.register_keystone_auth_fixture()
         headers = {'content-type': 'application/json'}
+
+        deploy_resp_dict = {'software_deployment': {
+            'config_id': 'dummy_config_id'
+        }}
+
+        deploy_resp_string = jsonutils.dumps(deploy_resp_dict)
+        deploy_http_resp = fakes.FakeHTTPResponse(200, 'OK',
+                                                  headers, deploy_resp_string)
+
         http_resp = fakes.FakeHTTPResponse(204, 'OK', headers, None)
         response = (http_resp, '')
+
+        def _get_deployment_request_except(id):
+            self.client.request('/software_deployments/%s' % id,
+                                'GET').AndRaise(exc.HTTPNotFound())
+
+        def _delete_deployment_request_except(id):
+            self.client.request('/software_deployments/%s' % id,
+                                'GET').AndReturn(deploy_http_resp)
+            self.client.request('/software_deployments/%s' % id,
+                                'DELETE').AndRaise(exc.HTTPNotFound())
+
+        def _delete_config_request_except(id):
+            self.client.request('/software_deployments/%s' % id,
+                                'GET').AndReturn(deploy_http_resp)
+            self.client.request('/software_deployments/%s' % id,
+                                'DELETE').AndReturn(http_resp)
+            self.client.request('/software_configs/dummy_config_id',
+                                'DELETE').AndRaise(exc.HTTPNotFound())
+
+        def _delete_request_success(id):
+            self.client.request('/software_deployments/%s' % id,
+                                'GET').AndReturn(deploy_http_resp)
+            self.client.request('/software_deployments/%s' % id,
+                                'DELETE').AndReturn(http_resp)
+            self.client.request('/software_configs/dummy_config_id',
+                                'DELETE').AndReturn(http_resp)
+
         if self.client == http.SessionClient:
-            self.client.request(
-                '/software_deployments/defg',
-                'DELETE').AndReturn(http_resp)
-            self.client.request(
-                '/software_deployments/qwer',
-                'DELETE').AndReturn(http_resp)
-            self.client.request(
-                '/software_deployments/defg',
-                'DELETE').AndRaise(exc.HTTPNotFound())
-            self.client.request(
-                '/software_deployments/qwer',
-                'DELETE').AndRaise(exc.HTTPNotFound())
+            _get_deployment_request_except('defg')
+            _get_deployment_request_except('qwer')
+            _delete_deployment_request_except('defg')
+            _delete_deployment_request_except('qwer')
+            _delete_config_request_except('defg')
+            _delete_config_request_except('qwer')
+            _delete_request_success('defg')
+            _delete_request_success('qwer')
         else:
             self.client.raw_request(
                 'DELETE', '/software_deployments/defg').AndReturn(response)
@@ -4241,9 +4527,20 @@ class ShellTestDeployment(ShellBase):
 
         self.m.ReplayAll()
 
-        self.assertEqual('', self.shell('deployment-delete defg qwer'))
         self.assertRaises(exc.CommandError, self.shell,
                           'deployment-delete defg qwer')
+        self.assertRaises(exc.CommandError, self.shell,
+                          'deployment-delete defg qwer')
+
+        output = self.shell('deployment-delete defg qwer')
+        self.assertRegexpMatches(output, 'Failed to delete the correlative '
+                                         'config dummy_config_id of '
+                                         'deployment defg')
+        self.assertRegexpMatches(output, 'Failed to delete the correlative '
+                                         'config dummy_config_id of '
+                                         'deployment qwer')
+
+        self.assertEqual('', self.shell('deployment-delete defg qwer'))
 
     def test_deploy_metadata(self):
         self.register_keystone_auth_fixture()
@@ -4457,13 +4754,13 @@ class ShellTestStandaloneToken(ShellTestUserPass):
             bad_json_file.write(b"{foo:}")
             bad_json_file.flush()
             self.shell_error("stack-create ts -f %s" % bad_json_file.name,
-                             failed_msg)
+                             failed_msg, exception=exc.CommandError)
 
         with tempfile.NamedTemporaryFile() as bad_json_file:
             bad_json_file.write(b'{"foo": None}')
             bad_json_file.flush()
             self.shell_error("stack-create ts -f %s" % bad_json_file.name,
-                             failed_msg)
+                             failed_msg, exception=exc.CommandError)
 
     def test_commandline_args_passed_to_requests(self):
         """Check that we have sent the proper arguments to requests."""

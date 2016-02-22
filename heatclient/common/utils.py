@@ -71,6 +71,10 @@ def json_formatter(js):
                            separators=(', ', ': '))
 
 
+def yaml_formatter(js):
+    return yaml.safe_dump(js, default_flow_style=False)
+
+
 def text_wrap_formatter(d):
     return '\n'.join(textwrap.wrap(d or '', 55))
 
@@ -96,20 +100,12 @@ def print_dict(d, formatters=None):
 def event_log_formatter(events):
     """Return the events in log format."""
     event_log = []
-    log_format = _("%(event_date)s  %(event_time)s  %(event_id)s "
-                   "[%(rsrc_name)s]: %(rsrc_status)s  %(rsrc_status_reason)s")
+    log_format = ("%(event_time)s "
+                  "[%(rsrc_name)s]: %(rsrc_status)s  %(rsrc_status_reason)s")
     for event in events:
         event_time = getattr(event, 'event_time', '')
-        time_date = event_time.split('T')
-        try:
-            event_time = time_date[0]
-            event_date = time_date[1][:-1]
-        except IndexError:
-            event_time = event_date = ''
-
         log = log_format % {
-            'event_date': event_date, 'event_time': event_time,
-            'event_id': getattr(event, 'id', ''),
+            'event_time': event_time.replace('T', ' '),
             'rsrc_name': getattr(event, 'resource_name', ''),
             'rsrc_status': getattr(event, 'resource_status', ''),
             'rsrc_status_reason': getattr(event, 'resource_status_reason', '')
@@ -235,7 +231,7 @@ def format_parameter_file(param_files, template_file=None,
             template_file, template_url))
 
     param_file = {}
-    for key, value in iter(params.items()):
+    for key, value in six.iteritems(params):
                 param_file[key] = resolve_param_get_file(value,
                                                          template_base_url)
     return param_file

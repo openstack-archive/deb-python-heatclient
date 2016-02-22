@@ -80,8 +80,7 @@ class HTTPMultipleChoices(HTTPException):
                 {
                     'name': self.__class__.__name__,
                     'code': self.code,
-                    'details': self.details
-                })
+                    'details': self.details})
 
 
 class BadRequest(HTTPException):
@@ -167,7 +166,7 @@ class HTTPServiceUnavailable(ServiceUnavailable):
     pass
 
 
-#NOTE(bcwaldon): Build a mapping of HTTP codes to corresponding exception
+# NOTE(bcwaldon): Build a mapping of HTTP codes to corresponding exception
 # classes
 _code_map = {}
 for obj_name in dir(sys.modules[__name__]):

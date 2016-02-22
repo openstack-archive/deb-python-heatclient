@@ -13,6 +13,7 @@
 from heatclient.common import environment_format
 
 import mock
+import six
 import testscenarios
 import testtools
 import yaml
@@ -29,6 +30,7 @@ class YamlEnvironmentTest(testtools.TestCase):
 parameter_defaults: {}
 parameters: {}
 resource_registry: {}
+event_sinks: {}
 '''
         tpl1 = environment_format.parse(yaml1)
         environment_format.default_for_missing(tpl1)
@@ -78,3 +80,14 @@ class YamlParseExceptions(testtools.TestCase):
 
             self.assertRaises(ValueError,
                               environment_format.parse, text)
+
+
+class DetailedYAMLParseExceptions(testtools.TestCase):
+
+    def test_parse_to_value_exception(self):
+        yaml = """not important
+but very:
+  - incorrect
+"""
+        ex = self.assertRaises(ValueError, environment_format.parse, yaml)
+        self.assertIn('but very:\n            ^', six.text_type(ex))

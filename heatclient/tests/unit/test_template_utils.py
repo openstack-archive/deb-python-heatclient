@@ -313,6 +313,45 @@ class ShellEnvironmentTest(testtools.TestCase):
         self.assertEqual({}, env)
         self.assertEqual({}, files)
 
+    def test_process_multiple_environments_and_files_from_object(self):
+
+        env_object = 'http://no.where/path/to/env.yaml'
+        env1 = b'''
+        parameters:
+          "param1": "value1"
+        resource_registry:
+          "OS::Thingy1": "b/a.yaml"
+        '''
+
+        self.m.ReplayAll()
+
+        self.object_requested = False
+
+        def env_path_is_object(object_url):
+            return True
+
+        def object_request(method, object_url):
+            self.object_requested = True
+            self.assertEqual('GET', method)
+            self.assertTrue(object_url.startswith("http://no.where/path/to/"))
+            if object_url == env_object:
+                return env1
+            else:
+                return self.template_a
+
+        files, env = template_utils.process_multiple_environments_and_files(
+            env_paths=[env_object], env_path_is_object=env_path_is_object,
+            object_request=object_request)
+        self.assertEqual(
+            {
+                'resource_registry': {
+                    'OS::Thingy1': 'http://no.where/path/to/b/a.yaml'},
+                'parameters': {'param1': 'value1'}
+            },
+            env)
+        self.assertEqual(self.template_a.decode('utf-8'),
+                         files['http://no.where/path/to/b/a.yaml'])
+
     def test_global_files(self):
         url = 'file:///home/b/a.yaml'
         env = '''
@@ -439,7 +478,7 @@ class TestGetTemplateContents(testtools.TestCase):
     def test_get_template_contents_file_none_existing(self):
         files, tmpl_parsed = template_utils.get_template_contents(
             existing=True)
-        self.assertEqual(None, tmpl_parsed)
+        self.assertIsNone(tmpl_parsed)
         self.assertEqual({}, files)
 
     def test_get_template_contents_parse_error(self):
@@ -491,6 +530,33 @@ class TestGetTemplateContents(testtools.TestCase):
         self.assertEqual({"AWSTemplateFormatVersion": "2010-09-09",
                           "foo": "bar"}, tmpl_parsed)
         self.assertEqual({}, files)
+        self.assertTrue(self.object_requested)
+
+    def test_get_nested_stack_template_contents_object(self):
+        tmpl = ('{"heat_template_version": "2016-04-08",'
+                '"resources": {'
+                '"FooBar": {'
+                '"type": "foo/bar.yaml"}}}')
+        url = 'http://no.where/path/to/a.yaml'
+        self.m.ReplayAll()
+
+        self.object_requested = False
+
+        def object_request(method, object_url):
+            self.object_requested = True
+            self.assertEqual('GET', method)
+            self.assertTrue(object_url.startswith("http://no.where/path/to/"))
+            if object_url == url:
+                return tmpl
+            else:
+                return '{"heat_template_version": "2016-04-08"}'
+
+        files, tmpl_parsed = template_utils.get_template_contents(
+            template_object=url,
+            object_request=object_request)
+
+        self.assertEqual(files['http://no.where/path/to/foo/bar.yaml'],
+                         '{"heat_template_version": "2016-04-08"}')
         self.assertTrue(self.object_requested)
 
     def check_non_utf8_content(self, filename, content):
