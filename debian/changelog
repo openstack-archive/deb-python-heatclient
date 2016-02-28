@@ -1,8 +1,12 @@
 python-heatclient (0.9.0-1) UNRELEASED; urgency=medium
 
+  [ David Della Vecchia ]
   * New upstream release.
   * d/control: Align depends with upstream.
   * d/rules: Use available python versions for tests.
+
+  [ Ondřej Nový ]
+  * Fixed VCS URLs (https).
 
  -- David Della Vecchia <ddv@canonical.com>  Mon, 22 Feb 2016 17:04:05 -0500
 
