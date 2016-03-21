@@ -2,13 +2,13 @@ Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: python-heatclient
 Source: https://github.com/openstack/python-heatclient
 
-Files: debian/*
-Copyright: (c) 2012-2013, Prach Pongpanich <prachpub@gmail.com>
-	(c) 2013, Thomas Goirand <zigo@debian.org>
-License: Apache-2
-
 Files: *
 Copyright: 2013, Openstack LLC
+License: Apache-2
+
+Files: debian/*
+Copyright: (c) 2012-2013, Prach Pongpanich <prachpub@gmail.com>
+	(c) 2013-2016, Thomas Goirand <zigo@debian.org>
 License: Apache-2
 
 License: Apache-2
