@@ -52,6 +52,28 @@ class ShellEnvironmentTest(testtools.TestCase):
         if url:
             self.assertEqual(content.decode('utf-8'), files[url])
 
+    def test_ignore_env_keys(self):
+        self.m.StubOutWithMock(request, 'urlopen')
+        env_file = '/home/my/dir/env.yaml'
+        env = b'''
+        resource_registry:
+          resources:
+            bar:
+              hooks: pre_create
+              restricted_actions: replace
+        '''
+        request.urlopen('file://%s' % env_file).AndReturn(
+            six.BytesIO(env))
+        self.m.ReplayAll()
+        _, env_dict = template_utils.process_environment_and_files(
+            env_file)
+        self.assertEqual(
+            {u'resource_registry': {u'resources': {
+                u'bar': {u'hooks': u'pre_create',
+                         u'restricted_actions': u'replace'}}}},
+            env_dict)
+        self.m.VerifyAll()
+
     def test_process_environment_file(self):
 
         self.m.StubOutWithMock(request, 'urlopen')
@@ -352,6 +374,42 @@ class ShellEnvironmentTest(testtools.TestCase):
         self.assertEqual(self.template_a.decode('utf-8'),
                          files['http://no.where/path/to/b/a.yaml'])
 
+    def test_process_multiple_environments_and_files_tracker(self):
+        # Setup
+        self.m.StubOutWithMock(request, 'urlopen')
+        env_file1 = '/home/my/dir/env1.yaml'
+
+        env1 = b'''
+        parameters:
+          "param1": "value1"
+        resource_registry:
+          "OS::Thingy1": "file:///home/b/a.yaml"
+        '''
+        request.urlopen('file://%s' % env_file1).AndReturn(
+            six.BytesIO(env1))
+        request.urlopen('file:///home/b/a.yaml').AndReturn(
+            six.BytesIO(self.template_a))
+        request.urlopen('file:///home/b/a.yaml').AndReturn(
+            six.BytesIO(self.template_a))
+        self.m.ReplayAll()
+
+        # Test
+        env_file_list = []
+        files, env = template_utils.process_multiple_environments_and_files(
+            [env_file1], env_list_tracker=env_file_list)
+
+        # Verify
+        expected_env = {'parameters': {'param1': 'value1'},
+                        'resource_registry':
+                            {'OS::Thingy1': 'file:///home/b/a.yaml'}
+                        }
+        self.assertEqual(expected_env, env)
+
+        self.assertEqual(self.template_a.decode('utf-8'),
+                         files['file:///home/b/a.yaml'])
+
+        self.assertEqual(['file:///home/my/dir/env1.yaml'], env_file_list)
+
     def test_global_files(self):
         url = 'file:///home/b/a.yaml'
         env = '''
@@ -444,8 +502,8 @@ class TestGetTemplateContents(testtools.TestCase):
 
     def test_get_template_contents_file(self):
         with tempfile.NamedTemporaryFile() as tmpl_file:
-            tmpl = b'{"AWSTemplateFormatVersion" : "2010-09-09",' \
-                   b' "foo": "bar"}'
+            tmpl = (b'{"AWSTemplateFormatVersion" : "2010-09-09",'
+                    b' "foo": "bar"}')
             tmpl_file.write(tmpl)
             tmpl_file.flush()
 
@@ -825,10 +883,10 @@ parameters:
         files, tmpl_parsed = template_utils.get_template_contents(
             template_file=tmpl_file)
 
-        self.assertEqual(yaml.load(self.foo_template.decode('utf-8')),
+        self.assertEqual(yaml.safe_load(self.foo_template.decode('utf-8')),
                          json.loads(files.get('file:///home/my/dir/foo.yaml')))
         self.assertEqual(
-            yaml.load(self.egg_template.decode('utf-8')),
+            yaml.safe_load(self.egg_template.decode('utf-8')),
             json.loads(files.get('file:///home/my/dir/spam/egg.yaml')))
 
         self.assertEqual({
@@ -907,7 +965,7 @@ parameters:
         files, tmpl_parsed = template_utils.get_template_contents(
             template_file=tmpl_file)
 
-        self.assertEqual(yaml.load(self.bar_template.decode('utf-8')),
+        self.assertEqual(yaml.safe_load(self.bar_template.decode('utf-8')),
                          json.loads(files.get('file:///home/my/dir/bar.yaml')))
 
         self.assertEqual({
@@ -1061,7 +1119,7 @@ parameters:
             }
         }, json.loads(files.get(template_url)))
 
-        self.assertEqual(yaml.load(self.foo_template.decode('utf-8')),
+        self.assertEqual(yaml.safe_load(self.foo_template.decode('utf-8')),
                          json.loads(files.get(foo_url)))
         self.assertEqual({
             u'heat_template_version': u'2013-05-23',
@@ -1081,9 +1139,9 @@ parameters:
         }, json.loads(files.get(egg_url)))
         self.assertEqual(b'ham contents',
                          files.get(ham_url))
-        self.assertEqual(yaml.load(self.foo_template.decode('utf-8')),
+        self.assertEqual(yaml.safe_load(self.foo_template.decode('utf-8')),
                          json.loads(files.get(one_url)))
-        self.assertEqual(yaml.load(self.foo_template.decode('utf-8')),
+        self.assertEqual(yaml.safe_load(self.foo_template.decode('utf-8')),
                          json.loads(files.get(two_url)))
         self.assertEqual(b'three contents',
                          files.get(three_url))

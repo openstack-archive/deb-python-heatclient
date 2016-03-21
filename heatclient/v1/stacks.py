@@ -177,14 +177,13 @@ class StackManager(StackChildManager):
         """Preview a stack update."""
         stack_identifier = self._resolve_stack_id(stack_id)
         headers = self.client.credentials_headers()
+        path = '/stacks/%s/preview' % stack_identifier
+        if kwargs.pop('show_nested', False):
+            path += '?show_nested=True'
         if kwargs.pop('existing', None):
-            resp = self.client.patch('/stacks/%s/preview' %
-                                     stack_identifier,
-                                     data=kwargs, headers=headers)
+            resp = self.client.patch(path, data=kwargs, headers=headers)
         else:
-            resp = self.client.put('/stacks/%s/preview' %
-                                   stack_identifier,
-                                   data=kwargs, headers=headers)
+            resp = self.client.put(path, data=kwargs, headers=headers)
         body = utils.get_response_body(resp)
         return body
 
@@ -277,10 +276,23 @@ class StackManager(StackChildManager):
 
     def validate(self, **kwargs):
         """Validate a stack template."""
-        url = '/validate'
-        if kwargs.pop('show_nested', False):
-            url += '?show_nested=True'
 
-        resp = self.client.post(url, data=kwargs)
+        url = '/validate'
+
+        params = {}
+        if kwargs.pop('show_nested', False):
+            params['show_nested'] = True
+
+        ignore_errors = kwargs.pop('ignore_errors', None)
+        if ignore_errors:
+            params['ignore_errors'] = ignore_errors
+
+        args = {}
+        if kwargs:
+            args['data'] = kwargs
+        if params:
+            args['params'] = params
+
+        resp = self.client.post(url, **args)
         body = utils.get_response_body(resp)
         return body

@@ -14,18 +14,27 @@
 """Orchestration v1 Stack action implementations"""
 
 import logging
+import sys
 
+from cliff import command
 from cliff import lister
 from cliff import show
 from openstackclient.common import exceptions as exc
 from openstackclient.common import parseractions
 from openstackclient.common import utils
+from oslo_serialization import jsonutils
+import six
+from six.moves.urllib import request
 
+from heatclient.common import event_utils
+from heatclient.common import format_utils
+from heatclient.common import hook_utils
 from heatclient.common import http
 from heatclient.common import template_utils
 from heatclient.common import utils as heat_utils
 from heatclient import exc as heat_exc
 from heatclient.openstack.common._i18n import _
+from heatclient.openstack.common._i18n import _LI
 
 
 def _authenticated_fetcher(client):
@@ -48,25 +57,25 @@ class CreateStack(show.ShowOne):
         parser = super(CreateStack, self).get_parser(prog_name)
         parser.add_argument(
             '-t', '--template',
-            metavar='<FILE or URL>',
+            metavar='<template>',
             required=True,
             help=_('Path to the template')
         )
         parser.add_argument(
             '-e', '--environment',
-            metavar='<FILE or URL>',
+            metavar='<environment>',
             action='append',
             help=_('Path to the environment. Can be specified multiple times')
         )
         parser.add_argument(
             '--timeout',
-            metavar='<TIMEOUT>',
+            metavar='<timeout>',
             type=int,
             help=_('Stack creating timeout in minutes')
         )
         parser.add_argument(
             '--pre-create',
-            metavar='<RESOURCE>',
+            metavar='<resource>',
             default=None,
             action='append',
             help=_('Name of a resource to set a pre-create hook to. Resources '
@@ -83,14 +92,14 @@ class CreateStack(show.ShowOne):
         )
         parser.add_argument(
             '--parameter',
-            metavar='<KEY=VALUE>',
+            metavar='<key=value>',
             action='append',
             help=_('Parameter values used to create the stack. This can be '
                    'specified multiple times')
         )
         parser.add_argument(
             '--parameter-file',
-            metavar='<KEY=FILE>',
+            metavar='<key=file>',
             action='append',
             help=_('Parameter values from file used to create the stack. '
                    'This can be specified multiple times. Parameter values '
@@ -103,7 +112,7 @@ class CreateStack(show.ShowOne):
         )
         parser.add_argument(
             '--tags',
-            metavar='<TAG1,TAG2...>',
+            metavar='<tag1,tag2...>',
             help=_('A list of tags to associate with the stack')
         )
         parser.add_argument(
@@ -114,7 +123,7 @@ class CreateStack(show.ShowOne):
         )
         parser.add_argument(
             'name',
-            metavar='<STACK_NAME>',
+            metavar='<stack-name>',
             help=_('Name of the stack to create')
         )
 
@@ -182,12 +191,9 @@ class CreateStack(show.ShowOne):
 
         stack = client.stacks.create(**fields)['stack']
         if parsed_args.wait:
-            if not utils.wait_for_status(client.stacks.get, parsed_args.name,
-                                         status_field='stack_status',
-                                         success_status='create_complete',
-                                         error_status='create_failed'):
-
-                msg = _('Stack %s failed to create.') % parsed_args.name
+            stack_status, msg = event_utils.poll_for_events(
+                client, parsed_args.name, action='CREATE')
+            if stack_status == 'CREATE_FAILED':
                 raise exc.CommandError(msg)
 
         return _show_stack(client, stack['id'], format='table', short=True)
@@ -201,16 +207,16 @@ class UpdateStack(show.ShowOne):
     def get_parser(self, prog_name):
         parser = super(UpdateStack, self).get_parser(prog_name)
         parser.add_argument(
-            '-t', '--template', metavar='<FILE or URL>',
+            '-t', '--template', metavar='<template>',
             help=_('Path to the template')
         )
         parser.add_argument(
-            '-e', '--environment', metavar='<FILE or URL>',
+            '-e', '--environment', metavar='<environment>',
             action='append',
             help=_('Path to the environment. Can be specified multiple times')
         )
         parser.add_argument(
-            '--pre-update', metavar='<RESOURCE>', action='append',
+            '--pre-update', metavar='<resource>', action='append',
             help=_('Name of a resource to set a pre-update hook to. Resources '
                    'in nested stacks can be set using slash as a separator: '
                    'nested_stack/another/my_resource. You can use wildcards '
@@ -219,11 +225,11 @@ class UpdateStack(show.ShowOne):
                    'multiple times')
         )
         parser.add_argument(
-            '--timeout', metavar='<TIMEOUT>', type=int,
+            '--timeout', metavar='<timeout>', type=int,
             help=_('Stack update timeout in minutes')
         )
         parser.add_argument(
-            '--rollback', metavar='<VALUE>',
+            '--rollback', metavar='<value>',
             help=_('Set rollback on update failure. '
                    'Value "enabled" sets rollback to enabled. '
                    'Value "disabled" sets rollback to disabled. '
@@ -236,13 +242,13 @@ class UpdateStack(show.ShowOne):
                    'would be changed')
         )
         parser.add_argument(
-            '--parameter', metavar='<KEY=VALUE>',
+            '--parameter', metavar='<key=value>',
             help=_('Parameter values used to create the stack. '
                    'This can be specified multiple times'),
             action='append'
         )
         parser.add_argument(
-            '--parameter-file', metavar='<KEY=FILE>',
+            '--parameter-file', metavar='<key=file>',
             help=_('Parameter values from file used to create the stack. '
                    'This can be specified multiple times. Parameter value '
                    'would be the content of the file'),
@@ -260,7 +266,7 @@ class UpdateStack(show.ShowOne):
                        'arg': '--parameter', 'env_arg': '--environment'}
         )
         parser.add_argument(
-            '--clear-parameter', metavar='<PARAMETER>',
+            '--clear-parameter', metavar='<parameter>',
             help=_('Remove the parameters from the set of parameters of '
                    'current stack for the %(cmd)s. The default value in the '
                    'template will be used. This can be specified multiple '
@@ -268,11 +274,11 @@ class UpdateStack(show.ShowOne):
             action='append'
         )
         parser.add_argument(
-            'stack', metavar='<STACK>',
+            'stack', metavar='<stack>',
             help=_('Name or ID of stack to update')
         )
         parser.add_argument(
-            '--tags', metavar='<TAG1,TAG2>',
+            '--tags', metavar='<tag1,tag2...>',
             help=_('An updated list of tags to associate with the stack')
         )
         parser.add_argument(
@@ -343,14 +349,21 @@ class UpdateStack(show.ShowOne):
 
             return columns, data
 
-        client.stacks.update(**fields)
         if parsed_args.wait:
-            if not utils.wait_for_status(client.stacks.get, parsed_args.stack,
-                                         status_field='stack_status',
-                                         success_status='update_complete',
-                                         error_status='update_failed'):
+            # find the last event to use as the marker
+            events = event_utils.get_events(client,
+                                            stack_id=parsed_args.stack,
+                                            event_args={'sort_dir': 'desc',
+                                                        'limit': 1})
+            marker = events[0].id if events else None
 
-                msg = _('Stack %s failed to update.') % parsed_args.stack
+        client.stacks.update(**fields)
+
+        if parsed_args.wait:
+            stack = client.stacks.get(parsed_args.stack)
+            stack_status, msg = event_utils.poll_for_events(
+                client, stack.stack_name, action='UPDATE', marker=marker)
+            if stack_status == 'UPDATE_FAILED':
                 raise exc.CommandError(msg)
 
         return _show_stack(client, parsed_args.stack, format='table',
@@ -358,7 +371,7 @@ class UpdateStack(show.ShowOne):
 
 
 class ShowStack(show.ShowOne):
-    """Show stack details"""
+    """Show stack details."""
 
     log = logging.getLogger(__name__ + ".ShowStack")
 
@@ -419,6 +432,7 @@ def _show_stack(heat_client, stack_id, format='', short=False):
             formatters['parameters'] = complex_formatter
             formatters['outputs'] = complex_formatter
             formatters['links'] = complex_formatter
+            formatters['tags'] = complex_formatter
 
         return columns, utils.get_item_properties(data, columns,
                                                   formatters=formatters)
@@ -449,37 +463,37 @@ class ListStack(lister.Lister):
         parser.add_argument(
             '--property',
             dest='properties',
-            metavar='<KEY=VALUE>',
+            metavar='<key=value>',
             help=_('Filter properties to apply on returned stacks (repeat to '
                    'filter on multiple properties)'),
             action=parseractions.KeyValueAction
         )
         parser.add_argument(
             '--tags',
-            metavar='<TAG1,TAG2...>',
+            metavar='<tag1,tag2...>',
             help=_('List of tags to filter by. Can be combined with '
                    '--tag-mode to specify how to filter tags')
         )
         parser.add_argument(
             '--tag-mode',
-            metavar='<MODE>',
+            metavar='<mode>',
             help=_('Method of filtering tags. Must be one of "any", "not", '
                    'or "not-any". If not specified, multiple tags will be '
                    'combined with the boolean AND expression')
         )
         parser.add_argument(
             '--limit',
-            metavar='<LIMIT>',
+            metavar='<limit>',
             help=_('The number of stacks returned')
         )
         parser.add_argument(
             '--marker',
-            metavar='<ID>',
+            metavar='<id>',
             help=_('Only return stacks that appear after the given ID')
         )
         parser.add_argument(
             '--sort',
-            metavar='<KEY>[:<DIRECTION>]',
+            metavar='<key>[:<direction>]',
             help=_('Sort output by selected keys and directions (asc or desc) '
                    '(default: asc). Specify multiple times to sort on '
                    'multiple properties')
@@ -500,7 +514,6 @@ class ListStack(lister.Lister):
             help=_('List additional fields in output, this is implied by '
                    '--all-projects')
         )
-
         return parser
 
     def take_action(self, parsed_args):
@@ -565,3 +578,676 @@ def _list(client, args=None):
         columns,
         (utils.get_item_properties(s, columns) for s in data)
     )
+
+
+class DeleteStack(command.Command):
+    """Delete stack(s)."""
+
+    log = logging.getLogger(__name__ + ".DeleteStack")
+
+    def get_parser(self, prog_name):
+        parser = super(DeleteStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            nargs='+',
+            help=_('Stack(s) to delete (name or ID)')
+        )
+        parser.add_argument(
+            '--yes',
+            action='store_true',
+            help=_('Skip yes/no prompt (assume yes)')
+        )
+        parser.add_argument(
+            '--wait',
+            action='store_true',
+            help=_('Wait for stack delete to complete')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug("take_action(%s)", parsed_args)
+
+        heat_client = self.app.client_manager.orchestration
+
+        try:
+            if not parsed_args.yes and sys.stdin.isatty():
+                sys.stdout.write(
+                    _("Are you sure you want to delete this stack(s) [y/N]? "))
+                prompt_response = sys.stdin.readline().lower()
+                if not prompt_response.startswith('y'):
+                    self.log.info(_LI('User did not confirm stack delete so '
+                                      'taking no action.'))
+                    return
+        except KeyboardInterrupt:  # ctrl-c
+            self.log.info(_LI('User did not confirm stack delete '
+                              '(ctrl-c) so taking no action.'))
+            return
+        except EOFError:  # ctrl-d
+            self.log.info(_LI('User did not confirm stack delete '
+                              '(ctrl-d) so taking no action.'))
+            return
+
+        failure_count = 0
+        stacks_waiting = []
+        for sid in parsed_args.stack:
+            marker = None
+            if parsed_args.wait:
+                try:
+                    # find the last event to use as the marker
+                    events = event_utils.get_events(heat_client,
+                                                    stack_id=sid,
+                                                    event_args={
+                                                        'sort_dir': 'desc',
+                                                        'limit': 1})
+                    if events:
+                        marker = events[0].id
+                except heat_exc.CommandError as ex:
+                    failure_count += 1
+                    print(ex)
+                    continue
+
+            try:
+                heat_client.stacks.delete(sid)
+                stacks_waiting.append((sid, marker))
+            except heat_exc.HTTPNotFound:
+                failure_count += 1
+                print(_('Stack not found: %s') % sid)
+
+        if parsed_args.wait:
+            for sid, marker in stacks_waiting:
+                try:
+                    stack_status, msg = event_utils.poll_for_events(
+                        heat_client, sid, action='DELETE', marker=marker)
+                except heat_exc.CommandError:
+                    continue
+                if stack_status == 'DELETE_FAILED':
+                    failure_count += 1
+                    print(msg)
+
+        if failure_count:
+            msg = (_('Unable to delete %(count)d of the %(total)d stacks.') %
+                   {'count': failure_count, 'total': len(parsed_args.stack)})
+            raise exc.CommandError(msg)
+
+
+class AdoptStack(show.ShowOne):
+    """Adopt a stack."""
+
+    log = logging.getLogger(__name__ + '.AdoptStack')
+
+    def get_parser(self, prog_name):
+        parser = super(AdoptStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'name',
+            metavar='<stack-name>',
+            help=_('Name of the stack to adopt')
+        )
+        parser.add_argument(
+            '-e', '--environment',
+            metavar='<environment>',
+            action='append',
+            help=_('Path to the environment. Can be specified multiple times')
+        )
+        parser.add_argument(
+            '--timeout',
+            metavar='<timeout>',
+            type=int,
+            help=_('Stack creation timeout in minutes')
+        )
+        parser.add_argument(
+            '--adopt-file',
+            metavar='<adopt-file>',
+            required=True,
+            help=_('Path to adopt stack data file')
+        )
+        parser.add_argument(
+            '--enable-rollback',
+            action='store_true',
+            help=_('Enable rollback on create/update failure')
+        )
+        parser.add_argument(
+            '--parameter',
+            metavar='<key=value>',
+            action='append',
+            help=_('Parameter values used to create the stack. Can be '
+                   'specified multiple times')
+        )
+        parser.add_argument(
+            '--wait',
+            action='store_true',
+            help=_('Wait until stack adopt completes')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        env_files, env = (
+            template_utils.process_multiple_environments_and_files(
+                env_paths=parsed_args.environment))
+
+        adopt_url = heat_utils.normalise_file_path_to_url(
+            parsed_args.adopt_file)
+        adopt_data = request.urlopen(adopt_url).read().decode('utf-8')
+
+        fields = {
+            'stack_name': parsed_args.name,
+            'disable_rollback': not parsed_args.enable_rollback,
+            'adopt_stack_data': adopt_data,
+            'parameters': heat_utils.format_parameters(parsed_args.parameter),
+            'files': dict(list(env_files.items())),
+            'environment': env,
+            'timeout': parsed_args.timeout
+        }
+
+        stack = client.stacks.create(**fields)['stack']
+
+        if parsed_args.wait:
+            stack_status, msg = event_utils.poll_for_events(
+                client, parsed_args.name, action='ADOPT')
+            if stack_status == 'ADOPT_FAILED':
+                raise exc.CommandError(msg)
+
+        return _show_stack(client, stack['id'], format='table', short=True)
+
+
+class AbandonStack(format_utils.JsonFormat):
+    """Abandon stack and output results."""
+
+    log = logging.getLogger(__name__ + '.AbandonStack')
+
+    def get_parser(self, prog_name):
+        parser = super(AbandonStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            help=_('Name or ID of stack to abandon')
+        )
+        parser.add_argument(
+            '--output-file',
+            metavar='<output-file>',
+            help=_('File to output abandon results')
+        )
+
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        try:
+            stack = client.stacks.abandon(stack_id=parsed_args.stack)
+        except heat_exc.HTTPNotFound:
+            msg = _('Stack not found: %s') % parsed_args.stack
+            raise exc.CommandError(msg)
+
+        if parsed_args.output_file is not None:
+            try:
+                with open(parsed_args.output_file, 'w') as f:
+                    f.write(jsonutils.dumps(stack, indent=2))
+                    return [], None
+            except IOError as e:
+                raise exc.CommandError(str(e))
+
+        data = list(six.itervalues(stack))
+        columns = list(six.iterkeys(stack))
+        return columns, data
+
+
+class OutputShowStack(show.ShowOne):
+    """Show stack output."""
+
+    log = logging.getLogger(__name__ + '.OutputShowStack')
+
+    def get_parser(self, prog_name):
+        parser = super(OutputShowStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            help=_('Name or ID of stack to query')
+        )
+        parser.add_argument(
+            'output',
+            metavar='<output>',
+            nargs='?',
+            default=None,
+            help=_('Name of an output to display')
+        )
+        parser.add_argument(
+            '--all',
+            action='store_true',
+            help=_('Display all stack outputs')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        if not parsed_args.all and parsed_args.output is None:
+            msg = _('Either <OUTPUT NAME> or --all must be specified.')
+            raise exc.CommandError(msg)
+
+        if parsed_args.all and parsed_args.output is not None:
+            msg = _('Cannot specify both <OUTPUT NAME> and --all.')
+            raise exc.CommandError(msg)
+
+        if parsed_args.all:
+            try:
+                stack = client.stacks.get(parsed_args.stack)
+            except heat_exc.HTTPNotFound:
+                msg = _('Stack not found: %s') % parsed_args.stack
+                raise exc.CommandError(msg)
+
+            outputs = stack.to_dict().get('outputs', [])
+            columns = []
+            values = []
+            for output in outputs:
+                columns.append(output['output_key'])
+                values.append(heat_utils.json_formatter(output))
+
+            return columns, values
+
+        try:
+            output = client.stacks.output_show(parsed_args.stack,
+                                               parsed_args.output)['output']
+        except heat_exc.HTTPNotFound:
+            msg = _('Stack %(id)s or output %(out)s not found.') % {
+                'id': parsed_args.stack, 'out': parsed_args.output}
+            raise exc.CommandError(msg)
+
+        if 'output_error' in output:
+            msg = _('Output error: %s') % output['output_error']
+            raise exc.CommandError(msg)
+
+        if (isinstance(output['output_value'], list) or
+                isinstance(output['output_value'], dict)):
+            output['output_value'] = heat_utils.json_formatter(
+                output['output_value'])
+
+        return self.dict2columns(output)
+
+
+class OutputListStack(lister.Lister):
+    """List stack outputs."""
+
+    log = logging.getLogger(__name__ + '.OutputListStack')
+
+    def get_parser(self, prog_name):
+        parser = super(OutputListStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            help=_('Name or ID of stack to query')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        try:
+            outputs = client.stacks.output_list(parsed_args.stack)['outputs']
+        except heat_exc.HTTPNotFound:
+            msg = _('Stack not found: %s') % parsed_args.stack
+            raise exc.CommandError(msg)
+
+        columns = ['output_key', 'description']
+
+        return (
+            columns,
+            (utils.get_dict_properties(s, columns) for s in outputs)
+        )
+
+
+class TemplateShowStack(format_utils.YamlFormat):
+    """Display stack template."""
+
+    log = logging.getLogger(__name__ + '.TemplateShowStack')
+
+    def get_parser(self, prog_name):
+        parser = super(TemplateShowStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            help=_('Name or ID of stack to query')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        try:
+            template = client.stacks.template(stack_id=parsed_args.stack)
+        except heat_exc.HTTPNotFound:
+            msg = _('Stack not found: %s') % parsed_args.stack
+            raise exc.CommandError(msg)
+
+        return self.dict2columns(template)
+
+
+class StackActionBase(lister.Lister):
+    """Stack actions base."""
+
+    log = logging.getLogger(__name__ + '.StackActionBase')
+
+    def _get_parser(self, prog_name, stack_help, wait_help):
+        parser = super(StackActionBase, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            nargs="+",
+            help=stack_help
+        )
+        parser.add_argument(
+            '--wait',
+            action='store_true',
+            help=wait_help
+        )
+        return parser
+
+    def _take_action(self, parsed_args, action, action_name=None):
+        self.log.debug("take_action(%s)", parsed_args)
+        heat_client = self.app.client_manager.orchestration
+        return _stacks_action(
+            parsed_args,
+            heat_client,
+            action,
+            action_name
+        )
+
+
+def _stacks_action(parsed_args, heat_client, action, action_name=None):
+    rows = []
+    columns = [
+        'ID',
+        'Stack Name',
+        'Stack Status',
+        'Creation Time',
+        'Updated Time'
+    ]
+    for stack in parsed_args.stack:
+        data = _stack_action(stack, parsed_args, heat_client, action,
+                             action_name)
+        rows += [utils.get_dict_properties(data.to_dict(), columns)]
+    return (columns, rows)
+
+
+def _stack_action(stack, parsed_args, heat_client, action, action_name=None):
+    if parsed_args.wait:
+        # find the last event to use as the marker
+        events = event_utils.get_events(heat_client,
+                                        stack_id=stack,
+                                        event_args={'sort_dir': 'desc',
+                                                    'limit': 1})
+        marker = events[0].id if events else None
+
+    try:
+        action(stack)
+    except heat_exc.HTTPNotFound:
+        msg = _('Stack not found: %s') % stack
+        raise exc.CommandError(msg)
+
+    if parsed_args.wait:
+        s = heat_client.stacks.get(stack)
+        stack_status, msg = event_utils.poll_for_events(
+            heat_client, s.stack_name, action=action_name, marker=marker)
+        if action_name:
+            if stack_status == '%s_FAILED' % action_name:
+                raise exc.CommandError(msg)
+        else:
+            if stack_status.endswith('_FAILED'):
+                raise exc.CommandError(msg)
+
+    return heat_client.stacks.get(stack)
+
+
+class SuspendStack(StackActionBase):
+    """Suspend a stack."""
+
+    log = logging.getLogger(__name__ + '.SuspendStack')
+
+    def get_parser(self, prog_name):
+        return self._get_parser(
+            prog_name,
+            _('Stack(s) to suspend (name or ID)'),
+            _('Wait for suspend to complete')
+        )
+
+    def take_action(self, parsed_args):
+        return self._take_action(
+            parsed_args,
+            self.app.client_manager.orchestration.actions.suspend,
+            'SUSPEND'
+        )
+
+
+class ResumeStack(StackActionBase):
+    """Resume a stack."""
+
+    log = logging.getLogger(__name__ + '.ResumeStack')
+
+    def get_parser(self, prog_name):
+        return self._get_parser(
+            prog_name,
+            _('Stack(s) to resume (name or ID)'),
+            _('Wait for resume to complete')
+        )
+
+    def take_action(self, parsed_args):
+        return self._take_action(
+            parsed_args,
+            self.app.client_manager.orchestration.actions.resume,
+            'RESUME'
+        )
+
+
+class CheckStack(StackActionBase):
+    """Check a stack."""
+
+    log = logging.getLogger(__name__ + '.CheckStack')
+
+    def get_parser(self, prog_name):
+        return self._get_parser(
+            prog_name,
+            _('Stack(s) to check update (name or ID)'),
+            _('Wait for check to complete')
+        )
+
+    def take_action(self, parsed_args):
+        return self._take_action(
+            parsed_args,
+            self.app.client_manager.orchestration.actions.check,
+            'CHECK'
+        )
+
+
+class CancelStack(StackActionBase):
+    """Cancel current task for a stack.
+
+    Supported tasks for cancellation:
+    * update
+    """
+
+    log = logging.getLogger(__name__ + '.CancelStack')
+
+    def get_parser(self, prog_name):
+        return self._get_parser(
+            prog_name,
+            _('Stack(s) to cancel (name or ID)'),
+            _('Wait for check to complete')
+        )
+
+    def take_action(self, parsed_args):
+        self.log.debug("take_action(%s)", parsed_args)
+        rows = []
+        columns = [
+            'ID',
+            'Stack Name',
+            'Stack Status',
+            'Creation Time',
+            'Updated Time'
+        ]
+        heat_client = self.app.client_manager.orchestration
+
+        for stack in parsed_args.stack:
+            try:
+                data = heat_client.stacks.get(stack_id=stack)
+            except heat_exc.HTTPNotFound:
+                raise exc.CommandError('Stack not found: %s' % stack)
+
+            status = getattr(data, 'stack_status').lower()
+            if status == 'update_in_progress':
+                data = _stack_action(
+                    stack,
+                    parsed_args,
+                    heat_client,
+                    heat_client.actions.cancel_update
+                )
+                rows += [utils.get_dict_properties(data.to_dict(), columns)]
+            else:
+                err = _("Stack %(id)s with status \'%(status)s\' "
+                        "not in cancelable state") % {
+                    'id': stack, 'status': status}
+                raise exc.CommandError(err)
+
+        return (columns, rows)
+
+
+class StackHookPoll(lister.Lister):
+    '''List resources with pending hook for a stack.'''
+
+    log = logging.getLogger(__name__ + '.StackHookPoll')
+
+    def get_parser(self, prog_name):
+        parser = super(StackHookPoll, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            help=_('Stack to display (name or ID)')
+        )
+        parser.add_argument(
+            '--nested-depth',
+            metavar='<nested-depth>',
+            help=_('Depth of nested stacks from which to display hooks')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug("take_action(%s)", parsed_args)
+        heat_client = self.app.client_manager.orchestration
+        return _hook_poll(
+            parsed_args,
+            heat_client
+        )
+
+
+def _hook_poll(args, heat_client):
+    """List resources with pending hook for a stack."""
+
+    # There are a few steps to determining if a stack has pending hooks
+    # 1. The stack is IN_PROGRESS status (otherwise, by definition no hooks
+    #    can be pending
+    # 2. There is an event for a resource associated with hitting a hook
+    # 3. There is not an event associated with clearing the hook in step(2)
+    #
+    # So, essentially, this ends up being a specially filtered type of event
+    # listing, because all hook status is exposed via events.  In future
+    # we might consider exposing some more efficient interface via the API
+    # to reduce the expense of this brute-force polling approach
+    columns = ['ID', 'Resource Status Reason', 'Resource Status', 'Event Time']
+
+    if args.nested_depth:
+        try:
+            nested_depth = int(args.nested_depth)
+        except ValueError:
+            msg = _("--nested-depth invalid value %s") % args.nested_depth
+            raise exc.CommandError(msg)
+        columns.append('Stack Name')
+    else:
+        nested_depth = 0
+
+    hook_type = hook_utils.get_hook_type_via_status(heat_client, args.stack)
+    event_args = {'sort_dir': 'asc'}
+    hook_events = event_utils.get_hook_events(
+        heat_client, stack_id=args.stack, event_args=event_args,
+        nested_depth=nested_depth, hook_type=hook_type)
+
+    if len(hook_events) >= 1:
+        if hasattr(hook_events[0], 'resource_name'):
+            columns.insert(0, 'Resource Name')
+        else:
+            columns.insert(0, 'Logical Resource ID')
+
+    rows = (utils.get_item_properties(h, columns) for h in hook_events)
+    return (columns, rows)
+
+
+class StackHookClear(command.Command):
+    """Clear resource hooks on a given stack."""
+
+    log = logging.getLogger(__name__ + '.StackHookClear')
+
+    def get_parser(self, prog_name):
+        parser = super(StackHookClear, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<stack>',
+            help=_('Stack to display (name or ID)')
+        )
+        parser.add_argument(
+            '--pre-create',
+            action='store_true',
+            help=_('Clear the pre-create hooks')
+        )
+        parser.add_argument(
+            '--pre-update',
+            action='store_true',
+            help=_('Clear the pre-update hooks')
+        )
+        parser.add_argument(
+            'hook',
+            metavar='<resource>',
+            nargs='+',
+            help=_('Resource names with hooks to clear. Resources '
+                   'in nested stacks can be set using slash as a separator: '
+                   'nested_stack/another/my_resource. You can use wildcards '
+                   'to match multiple stacks or resources: '
+                   'nested_stack/an*/*_resource')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug("take_action(%s)", parsed_args)
+        heat_client = self.app.client_manager.orchestration
+        return _hook_clear(
+            parsed_args,
+            heat_client
+        )
+
+
+def _hook_clear(args, heat_client):
+    """Clear resource hooks on a given stack."""
+    if args.pre_create:
+        hook_type = 'pre-create'
+    elif args.pre_update:
+        hook_type = 'pre-update'
+    else:
+        hook_type = hook_utils.get_hook_type_via_status(heat_client,
+                                                        args.stack)
+
+    for hook_string in args.hook:
+        hook = [b for b in hook_string.split('/') if b]
+        resource_pattern = hook[-1]
+        stack_id = args.stack
+
+        hook_utils.clear_wildcard_hooks(heat_client, stack_id, hook[:-1],
+                                        hook_type, resource_pattern)

@@ -115,7 +115,15 @@ class ResourceManagerTest(testtools.TestCase):
         self._test_list(
             fields={'stack_id': 'teststack', 'nested_depth': '99'},
             expect='/stacks/teststack/resources?%s' % parse.urlencode({
-                'nested_depth': 99,
+                'nested_depth': 99
+            }, True)
+        )
+
+    def test_list_filtering(self):
+        self._test_list(
+            fields={'stack_id': 'teststack', 'filters': {'name': 'rsc_1'}},
+            expect='/stacks/teststack/resources?%s' % parse.urlencode({
+                'name': 'rsc_1'
             }, True)
         )
 
@@ -190,6 +198,20 @@ class ResourceManagerTest(testtools.TestCase):
 
         manager = self._base_test(expect, key)
         manager.signal(**fields)
+        self.m.VerifyAll()
+
+    def test_mark_unhealthy(self):
+        fields = {'stack_id': 'teststack',
+                  'resource_name': 'testresource',
+                  'mark_unhealthy': 'True',
+                  'resource_status_reason': 'Anything'}
+        expect = ('PATCH',
+                  '/stacks/teststack%2Fabcd1234/resources'
+                  '/testresource')
+        key = 'mark_unhealthy'
+
+        manager = self._base_test(expect, key)
+        manager.mark_unhealthy(**fields)
         self.m.VerifyAll()
 
 

@@ -16,6 +16,8 @@ import testtools
 
 import heatclient.v1.shell as shell
 
+from heatclient.common import hook_utils
+
 
 class TestHooks(testtools.TestCase):
     def setUp(self):
@@ -32,8 +34,8 @@ class TestHooks(testtools.TestCase):
         type(self.args).id = stack_name_p
         shell.template_utils.get_template_contents = mock.Mock(
             return_value=({}, ""))
-        shell.template_utils.process_multiple_environments_and_files = \
-            mock.Mock(return_value=({}, {}))
+        shell.template_utils.process_multiple_environments_and_files = (
+            mock.Mock(return_value=({}, {})))
         shell.utils.format_all_parameters = mock.Mock(return_value=[])
         shell.do_stack_list = mock.Mock()
         shell.logger = mock.Mock()
@@ -100,8 +102,8 @@ class TestHooks(testtools.TestCase):
                 }
             }
         }
-        shell.template_utils.process_multiple_environments_and_files = \
-            mock.Mock(return_value=({}, env))
+        shell.template_utils.process_multiple_environments_and_files = (
+            mock.Mock(return_value=({}, env)))
 
         shell.do_stack_create(self.client, self.args)
         self.assertEqual(1, self.client.stacks.create.call_count)
@@ -188,8 +190,8 @@ class TestHooks(testtools.TestCase):
                 }
             }
         }
-        shell.template_utils.process_multiple_environments_and_files = \
-            mock.Mock(return_value=({}, env))
+        shell.template_utils.process_multiple_environments_and_files = (
+            mock.Mock(return_value=({}, env)))
 
         shell.do_stack_update(self.client, self.args)
         self.assertEqual(1, self.client.stacks.update.call_count)
@@ -220,8 +222,8 @@ class TestHooks(testtools.TestCase):
         self.assertEqual(expected_hooks, actual_hooks)
 
     def test_clear_all_hooks(self):
-        shell._get_hook_type_via_status =\
-            mock.Mock(return_value='pre-create')
+        hook_utils.get_hook_type_via_status = mock.Mock(
+            return_value='pre-create')
         type(self.args).hook = mock.PropertyMock(
             return_value=['bp'])
         type(self.args).pre_create = mock.PropertyMock(return_value=True)

@@ -12,6 +12,7 @@
 # limitations under the License.
 
 import fixtures
+import mock
 import os
 from oslotest import mockpatch
 import requests
@@ -754,7 +755,8 @@ class ShellTestUserPass(ShellBase):
             "id": "1",
             "stack_name": "teststack",
             "stack_status": 'CREATE_COMPLETE',
-            "creation_time": "2012-10-25T01:58:47Z"
+            "creation_time": "2012-10-25T01:58:47Z",
+            "tags": [u'tag1', u'tag2']
         }}
         resp = fakes.FakeHTTPResponse(
             200,
@@ -777,9 +779,11 @@ class ShellTestUserPass(ShellBase):
             'stack_name',
             'stack_status',
             'creation_time',
+            'tags',
             'teststack',
             'CREATE_COMPLETE',
-            '2012-10-25T01:58:47Z'
+            '2012-10-25T01:58:47Z',
+            "['tag1', 'tag2']",
         ]
         for r in required:
             self.assertRegexpMatches(list_text, r)
@@ -1841,6 +1845,16 @@ class ShellTestUserPass(ShellBase):
         self.shell_error('stack-adopt teststack ', failed_msg,
                          exception=exc.CommandError)
 
+    def test_stack_adopt_empty_data_file(self):
+        failed_msg = 'Invalid adopt-file, no data!'
+        self.register_keystone_auth_fixture()
+        self.m.ReplayAll()
+        with tempfile.NamedTemporaryFile() as file_obj:
+            self.shell_error(
+                'stack-adopt teststack '
+                '--adopt-file=%s ' % (file_obj.name),
+                failed_msg, exception=exc.CommandError)
+
     def test_stack_update_enable_rollback(self):
         self.register_keystone_auth_fixture()
         template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
@@ -2317,7 +2331,8 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(update_text, r)
 
-    def _setup_stubs_update_dry_run(self, template_file, existing=False):
+    def _setup_stubs_update_dry_run(self, template_file, existing=False,
+                                    show_nested=False):
         self.register_keystone_auth_fixture()
 
         template_data = open(template_file).read()
@@ -2365,13 +2380,17 @@ class ShellTestUserPass(ShellBase):
         else:
             method = 'PUT'
 
+        if show_nested:
+            path = '/stacks/teststack2/2/preview?show_nested=True'
+        else:
+            path = '/stacks/teststack2/2/preview'
+
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack2/2/preview', method,
-                data=expected_data, headers={}).AndReturn(resp)
+                path, method, data=expected_data, headers={}).AndReturn(resp)
         else:
             http.HTTPClient.json_request(
-                method, '/stacks/teststack2/2/preview',
+                method, path,
                 data=expected_data,
                 headers={'X-Auth-Key': 'password', 'X-Auth-User': 'username'}
             ).AndReturn((resp, None))
@@ -2385,6 +2404,28 @@ class ShellTestUserPass(ShellBase):
             'stack-update teststack2/2 '
             '--template-file=%s '
             '--enable-rollback '
+            '--parameters="KeyPairName=updated_key" '
+            '--dry-run ' % template_file)
+
+        required = [
+            'stack_name',
+            'id',
+            'teststack2',
+            '2',
+            'state',
+            'replaced'
+        ]
+        for r in required:
+            self.assertRegexpMatches(update_preview_text, r)
+
+    def test_stack_update_dry_run_show_nested(self):
+        template_file = os.path.join(TEST_VAR_DIR, 'minimal.template')
+        self._setup_stubs_update_dry_run(template_file, show_nested=True)
+        update_preview_text = self.shell(
+            'stack-update teststack2/2 '
+            '--template-file=%s '
+            '--enable-rollback '
+            '--show-nested '
             '--parameters="KeyPairName=updated_key" '
             '--dry-run ' % template_file)
 
@@ -2420,6 +2461,89 @@ class ShellTestUserPass(ShellBase):
         ]
         for r in required:
             self.assertRegexpMatches(update_preview_text, r)
+
+    # the main thing this @mock.patch is doing here is keeping
+    # sys.stdin untouched for later tests
+    @mock.patch('sys.stdin', new_callable=six.StringIO)
+    def test_stack_delete_prompt_with_tty(self, ms):
+        self.register_keystone_auth_fixture()
+        mock_stdin = mock.Mock()
+        mock_stdin.isatty = mock.Mock()
+        mock_stdin.isatty.return_value = True
+        mock_stdin.readline = mock.Mock()
+        mock_stdin.readline.return_value = 'n'
+        sys.stdin = mock_stdin
+
+        resp = fakes.FakeHTTPResponse(
+            204,
+            'No Content',
+            {},
+            None)
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack2/2', 'DELETE').AndReturn(resp)
+        else:
+            self.client.raw_request(
+                'DELETE', '/stacks/teststack2/2').AndReturn((resp, None))
+        fakes.script_heat_list(client=self.client)
+
+        self.m.ReplayAll()
+
+        delete_text = self.shell('stack-delete teststack2/2')
+        self.assertRegexpMatches(
+            delete_text, "Are you sure you want to delete this stack")
+        self.assertNotRegexpMatches(delete_text, "teststack")
+        self.m.ReplayAll()
+
+        mock_stdin.readline.return_value = 'Y'
+        delete_text = self.shell('stack-delete teststack2/2')
+        required = [
+            'stack_name',
+            'id',
+            'teststack',
+            '1'
+        ]
+        for r in required:
+            self.assertRegexpMatches(delete_text, r)
+
+    # the main thing this @mock.patch is doing here is keeping
+    # sys.stdin untouched for later tests
+    @mock.patch('sys.stdin', new_callable=six.StringIO)
+    def test_stack_delete_prompt_with_tty_y(self, ms):
+        self.register_keystone_auth_fixture()
+        mock_stdin = mock.Mock()
+        mock_stdin.isatty = mock.Mock()
+        mock_stdin.isatty.return_value = True
+        mock_stdin.readline = mock.Mock()
+        mock_stdin.readline.return_value = ''
+        sys.stdin = mock_stdin
+
+        resp = fakes.FakeHTTPResponse(
+            204,
+            'No Content',
+            {},
+            None)
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack2/2', 'DELETE').AndReturn(resp)
+        else:
+            self.client.raw_request(
+                'DELETE', '/stacks/teststack2/2').AndReturn((resp, None))
+        fakes.script_heat_list(client=self.client)
+
+        self.m.ReplayAll()
+        # -y from the shell should skip the n/y prompt
+        delete_text = self.shell('stack-delete -y teststack2/2')
+        self.assertNotRegexpMatches(
+            delete_text, "Are you sure you want to delete this stack")
+        required = [
+            'stack_name',
+            'id',
+            'teststack',
+            '1'
+        ]
+        for r in required:
+            self.assertRegexpMatches(delete_text, r)
 
     def test_stack_delete(self):
         self.register_keystone_auth_fixture()
@@ -2458,28 +2582,46 @@ class ShellTestUserPass(ShellBase):
             None)
         if self.client == http.SessionClient:
             self.client.request(
-                '/stacks/teststack1/1', 'DELETE').AndReturn(resp)
+                '/stacks/teststack/1', 'DELETE').AndReturn(resp)
             self.client.request(
                 '/stacks/teststack2/2', 'DELETE').AndReturn(resp)
         else:
             self.client.raw_request(
-                'DELETE', '/stacks/teststack1/1').AndReturn((resp, None))
+                'DELETE', '/stacks/teststack/1').AndReturn((resp, None))
             self.client.raw_request(
                 'DELETE', '/stacks/teststack2/2').AndReturn((resp, None))
         fakes.script_heat_list(client=self.client)
 
         self.m.ReplayAll()
 
-        delete_text = self.shell('stack-delete teststack1/1 teststack2/2')
+        delete_text = self.shell('stack-delete teststack/1 teststack2/2')
 
         required = [
             'stack_name',
             'id',
             'teststack',
-            '1'
+            '1',
+            'teststack2',
+            '2'
         ]
         for r in required:
             self.assertRegexpMatches(delete_text, r)
+
+    def test_stack_delete_failed(self):
+        self.register_keystone_auth_fixture()
+
+        if self.client == http.SessionClient:
+            self.client.request(
+                '/stacks/teststack1/1', 'DELETE').AndRaise(exc.HTTPNotFound())
+        else:
+            http.HTTPClient.raw_request(
+                'DELETE',
+                '/stacks/teststack1/1').AndRaise(exc.HTTPNotFound())
+        self.m.ReplayAll()
+        error = self.assertRaises(
+            exc.CommandError, self.shell, 'stack-delete teststack1/1')
+        self.assertIn('Unable to delete 1 of the 1 stacks.',
+                      str(error))
 
     def test_build_info(self):
         self.register_keystone_auth_fixture()
@@ -2798,7 +2940,7 @@ class ShellTestUserPass(ShellBase):
                                                               resp_dict1))
 
         self.m.ReplayAll()
-        list_text = self.shell('output-show teststack/1 key --all')
+        list_text = self.shell('output-show --with-detail teststack/1 --all')
         required = [
             'output_key',
             'output_value',
@@ -2834,7 +2976,7 @@ class ShellTestUserPass(ShellBase):
                 '/stacks/teststack/1/outputs/key').AndReturn((resp, resp_dict))
 
         self.m.ReplayAll()
-        resp = self.shell('output-show teststack/1 key')
+        resp = self.shell('output-show --with-detail teststack/1 key')
         required = [
             'output_key',
             'output_value',
@@ -2890,7 +3032,7 @@ class ShellTestUserPass(ShellBase):
                         jsonutils.dumps(stack_dict)), stack_dict))
 
         self.m.ReplayAll()
-        resp = self.shell('output-show teststack/1 key')
+        resp = self.shell('output-show --with-detail teststack/1 key')
         required = [
             'output_key',
             'output_value',
@@ -2902,11 +3044,11 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(resp, r)
 
-    def test_output_show_output1(self):
+    def test_output_show_output1_with_detail(self):
         self.register_keystone_auth_fixture()
 
         self._output_fake_response('output1')
-        list_text = self.shell('output-show teststack/1 output1')
+        list_text = self.shell('output-show teststack/1 output1 --with-detail')
         required = [
             'output_key',
             'output_value',
@@ -2918,26 +3060,27 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(list_text, r)
 
-    def test_output_show_output1_only_value(self):
+    def test_output_show_output1(self):
         self.register_keystone_auth_fixture()
 
         self._output_fake_response('output1')
-        list_text = self.shell('output-show -v -F raw teststack/1 output1')
+        list_text = self.shell('output-show -F raw teststack/1 output1')
         self.assertEqual('value1\n', list_text)
-
-    def test_output_show_output2_raw_only_value(self):
-        self.register_keystone_auth_fixture()
-
-        self._output_fake_response('output2')
-        list_text = self.shell('output-show -F raw -v teststack/1 output2')
-        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
-                         list_text)
 
     def test_output_show_output2_raw(self):
         self.register_keystone_auth_fixture()
 
         self._output_fake_response('output2')
         list_text = self.shell('output-show -F raw teststack/1 output2')
+        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
+                         list_text)
+
+    def test_output_show_output2_raw_with_detail(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output2')
+        list_text = self.shell('output-show -F raw --with-detail '
+                               'teststack/1 output2')
         required = [
             'output_key',
             'output_value',
@@ -2949,19 +3092,20 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(list_text, r)
 
-    def test_output_show_output2_json_only_value(self):
-        self.register_keystone_auth_fixture()
-
-        self._output_fake_response('output2')
-        list_text = self.shell('output-show -F json -v teststack/1 output2')
-        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
-                         list_text)
-
     def test_output_show_output2_json(self):
         self.register_keystone_auth_fixture()
 
         self._output_fake_response('output2')
         list_text = self.shell('output-show -F json teststack/1 output2')
+        self.assertEqual('[\n  "output", \n  "value", \n  "2"\n]\n',
+                         list_text)
+
+    def test_output_show_output2_json_with_detail(self):
+        self.register_keystone_auth_fixture()
+
+        self._output_fake_response('output2')
+        list_text = self.shell('output-show -F json --with-detail '
+                               'teststack/1 output2')
         required = [
             'output_key',
             'output_value',
@@ -2973,11 +3117,11 @@ class ShellTestUserPass(ShellBase):
         for r in required:
             self.assertRegexpMatches(list_text, r)
 
-    def test_output_show_unicode_output_only_value(self):
+    def test_output_show_unicode_output(self):
         self.register_keystone_auth_fixture()
 
         self._output_fake_response('output_uni')
-        list_text = self.shell('output-show -v teststack/1 output_uni')
+        list_text = self.shell('output-show teststack/1 output_uni')
         self.assertEqual(u'"test\u2665"\n', list_text)
 
     def test_output_show_error(self):
@@ -3731,7 +3875,8 @@ class ShellTestResources(ShellBase):
 --------------+
 ''', resource_list_text)
 
-    def test_resource_list_nested(self):
+    def _test_resource_list_more_args(self, query_args, cmd_args,
+                                      response_args):
         self.register_keystone_auth_fixture()
         resp_dict = {"resources": [{
             "resource_name": "foobar",
@@ -3750,55 +3895,35 @@ class ShellTestResources(ShellBase):
             jsonutils.dumps(resp_dict))
         stack_id = 'teststack/1'
         http.SessionClient.request(
-            '/stacks/%s/resources?nested_depth=99' % (
-                stack_id), 'GET').AndReturn(resp)
+            '/stacks/%s/resources?%s' % (
+                stack_id, query_args), 'GET').AndReturn(resp)
 
         self.m.ReplayAll()
 
-        shell_cmd = 'resource-list {0} --nested-depth {1}'.format(stack_id, 99)
+        shell_cmd = 'resource-list %s %s' % (stack_id, cmd_args)
+
         resource_list_text = self.shell(shell_cmd)
 
-        required = [
-            'resource_name', 'foobar',
-            'stack_name', 'foo',
-        ]
-        for field in required:
+        for field in response_args:
             self.assertRegexpMatches(resource_list_text, field)
+
+    def test_resource_list_nested(self):
+        self._test_resource_list_more_args(
+            query_args='nested_depth=99',
+            cmd_args='--nested-depth 99',
+            response_args=['resource_name', 'foobar', 'stack_name', 'foo'])
+
+    def test_resource_list_filter(self):
+        self._test_resource_list_more_args(
+            query_args='name=foobar',
+            cmd_args='--filter name=foobar',
+            response_args=['resource_name', 'foobar'])
 
     def test_resource_list_detail(self):
-        self.register_keystone_auth_fixture()
-        resp_dict = {"resources": [{
-            "resource_name": "foobar",
-            "links": [{
-                "href": "http://heat.example.com:8004/foo/12/resources/foobar",
-                "rel": "self"
-            }, {
-                "href": "http://heat.example.com:8004/foo/12",
-                "rel": "stack"
-            }],
-        }]}
-        resp = fakes.FakeHTTPResponse(
-            200,
-            'OK',
-            {'content-type': 'application/json'},
-            jsonutils.dumps(resp_dict))
-        stack_id = 'teststack/1'
-        http.SessionClient.request('/stacks/%s/resources?%s' % (
-            stack_id,
-            parse.urlencode({'with_detail': True}, True)
-        ), 'GET').AndReturn(resp)
-
-        self.m.ReplayAll()
-
-        shell_cmd = 'resource-list {0} --with-detail'.format(stack_id)
-        resource_list_text = self.shell(shell_cmd)
-
-        required = [
-            'resource_name', 'foobar',
-            'stack_name', 'foo',
-        ]
-        for field in required:
-            self.assertRegexpMatches(resource_list_text, field)
+        self._test_resource_list_more_args(
+            query_args=parse.urlencode({'with_detail': True}, True),
+            cmd_args='--with-detail',
+            response_args=['resource_name', 'foobar', 'stack_name', 'foo'])
 
     def test_resource_show_with_attrs(self):
         self.register_keystone_auth_fixture()
@@ -3983,6 +4108,87 @@ class ShellTestResources(ShellBase):
                 'resource-signal {0} {1} -f {2}'.format(
                     stack_id, resource_name, data_file.name))
             self.assertEqual("", text)
+
+    def test_resource_mark_unhealthy(self):
+        self.register_keystone_auth_fixture()
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {},
+            '')
+        stack_id = 'teststack/1'
+        resource_name = 'aResource'
+        http.SessionClient.request(
+            '/stacks/%s/resources/%s' %
+            (
+                parse.quote(stack_id, ''),
+                parse.quote(encodeutils.safe_encode(
+                    resource_name), '')
+            ),
+            'PATCH',
+            data={'mark_unhealthy': True,
+                  'resource_status_reason': 'Any'}).AndReturn(resp)
+
+        self.m.ReplayAll()
+
+        text = self.shell(
+            'resource-mark-unhealthy {0} {1} Any'.format(
+                stack_id, resource_name))
+        self.assertEqual("", text)
+
+    def test_resource_mark_unhealthy_reset(self):
+        self.register_keystone_auth_fixture()
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {},
+            '')
+        stack_id = 'teststack/1'
+        resource_name = 'aResource'
+        http.SessionClient.request(
+            '/stacks/%s/resources/%s' %
+            (
+                parse.quote(stack_id, ''),
+                parse.quote(encodeutils.safe_encode(
+                    resource_name), '')
+            ),
+            'PATCH',
+            data={'mark_unhealthy': False,
+                  'resource_status_reason': 'Any'}).AndReturn(resp)
+
+        self.m.ReplayAll()
+
+        text = self.shell(
+            'resource-mark-unhealthy --reset {0} {1} Any'.format(
+                stack_id, resource_name))
+        self.assertEqual("", text)
+
+    def test_resource_mark_unhealthy_no_reason(self):
+        self.register_keystone_auth_fixture()
+        resp = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {},
+            '')
+        stack_id = 'teststack/1'
+        resource_name = 'aResource'
+        http.SessionClient.request(
+            '/stacks/%s/resources/%s' %
+            (
+                parse.quote(stack_id, ''),
+                parse.quote(encodeutils.safe_encode(
+                    resource_name), '')
+            ),
+            'PATCH',
+            data={'mark_unhealthy': True,
+                  'resource_status_reason': ''}).AndReturn(resp)
+
+        self.m.ReplayAll()
+
+        text = self.shell(
+            'resource-mark-unhealthy {0} {1}'.format(
+                stack_id, resource_name))
+        self.assertEqual("", text)
 
 
 class ShellTestResourceTypes(ShellBase):
@@ -4206,8 +4412,11 @@ class ShellTestConfig(ShellBase):
         self.m.ReplayAll()
 
         self.assertEqual('', self.shell('config-delete abcd qwer'))
-        self.assertRaises(
+
+        error = self.assertRaises(
             exc.CommandError, self.shell, 'config-delete abcd qwer')
+        self.assertIn('Unable to delete 2 of the 2 configs.',
+                      str(error))
 
 
 class ShellTestDeployment(ShellBase):
@@ -4527,11 +4736,14 @@ class ShellTestDeployment(ShellBase):
 
         self.m.ReplayAll()
 
-        self.assertRaises(exc.CommandError, self.shell,
-                          'deployment-delete defg qwer')
-        self.assertRaises(exc.CommandError, self.shell,
-                          'deployment-delete defg qwer')
-
+        error = self.assertRaises(
+            exc.CommandError, self.shell, 'deployment-delete defg qwer')
+        self.assertIn('Unable to delete 2 of the 2 deployments.',
+                      str(error))
+        error2 = self.assertRaises(
+            exc.CommandError, self.shell, 'deployment-delete defg qwer')
+        self.assertIn('Unable to delete 2 of the 2 deployments.',
+                      str(error2))
         output = self.shell('deployment-delete defg qwer')
         self.assertRegexpMatches(output, 'Failed to delete the correlative '
                                          'config dummy_config_id of '

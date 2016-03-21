@@ -13,25 +13,25 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import fnmatch
 import logging
 
 from oslo_serialization import jsonutils
 from oslo_utils import strutils
 import six
 from six.moves.urllib import request
-import time
+import sys
 import yaml
 
 from heatclient.common import deployment_utils
 from heatclient.common import event_utils
+from heatclient.common import hook_utils
 from heatclient.common import http
 from heatclient.common import template_format
 from heatclient.common import template_utils
 from heatclient.common import utils
 
 from heatclient.openstack.common._i18n import _
-from heatclient.openstack.common._i18n import _LE
+from heatclient.openstack.common._i18n import _LI
 from heatclient.openstack.common._i18n import _LW
 
 import heatclient.exc as exc
@@ -105,8 +105,9 @@ def do_stack_create(hc, args):
         args.template_url,
         args.template_object,
         _authenticated_fetcher(hc))
+    env_files_list = []
     env_files, env = template_utils.process_multiple_environments_and_files(
-        env_paths=args.environment_file)
+        env_paths=args.environment_file, env_list_tracker=env_files_list)
 
     if args.create_timeout:
         logger.warning(_LW('%(arg1)s is deprecated, '
@@ -130,6 +131,10 @@ def do_stack_create(hc, args):
         'environment': env
     }
 
+    # If one or more environments is found, pass the listing to the server
+    if env_files_list:
+        fields['environment_files'] = env_files_list
+
     if args.tags:
         fields['tags'] = args.tags
     timeout = args.timeout or args.create_timeout
@@ -138,8 +143,17 @@ def do_stack_create(hc, args):
 
     hc.stacks.create(**fields)
     do_stack_list(hc)
-    if args.poll is not None:
-        _poll_for_events(hc, args.name, 'CREATE', args.poll)
+    if not args.poll:
+        return
+
+    show_fields = {'stack_id': args.name}
+    _do_stack_show(hc, show_fields)
+    stack_status, msg = event_utils.poll_for_events(
+        hc, args.name, action='CREATE', poll_period=args.poll)
+    _do_stack_show(hc, show_fields)
+    if stack_status == 'CREATE_FAILED':
+        raise exc.StackFailure(msg)
+    print(msg)
 
 
 @utils.arg('-e', '--environment-file', metavar='<FILE or URL>',
@@ -176,6 +190,9 @@ def do_stack_adopt(hc, args):
 
     adopt_url = utils.normalise_file_path_to_url(args.adopt_file)
     adopt_data = request.urlopen(adopt_url).read()
+
+    if not len(adopt_data):
+        raise exc.CommandError('Invalid adopt-file, no data!')
 
     if args.create_timeout:
         logger.warning(_LW('%(arg1)s is deprecated, '
@@ -239,8 +256,9 @@ def do_stack_preview(hc, args):
         args.template_url,
         args.template_object,
         _authenticated_fetcher(hc))
+    env_files_list = []
     env_files, env = template_utils.process_multiple_environments_and_files(
-        env_paths=args.environment_file)
+        env_paths=args.environment_file, env_list_tracker=env_files_list)
 
     fields = {
         'stack_name': args.name,
@@ -254,6 +272,10 @@ def do_stack_preview(hc, args):
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
     }
+
+    # If one or more environments is found, pass the listing to the server
+    if env_files_list:
+        fields['environment_files'] = env_files_list
 
     if args.tags:
         fields['tags'] = args.tags
@@ -273,9 +295,29 @@ def do_stack_preview(hc, args):
 
 @utils.arg('id', metavar='<NAME or ID>', nargs='+',
            help=_('Name or ID of stack(s) to delete.'))
+@utils.arg('-y', '--yes', default=False, action="store_true",
+           help=_('Skip yes/no prompt (assume yes).'))
 def do_stack_delete(hc, args):
     '''Delete the stack(s).'''
     failure_count = 0
+
+    try:
+        if not args.yes and sys.stdin.isatty():
+            sys.stdout.write(
+                _("Are you sure you want to delete this stack(s) [y/N]? "))
+            prompt_response = sys.stdin.readline().lower()
+            if not prompt_response.startswith('y'):
+                logger.info(_LI(
+                    'User did not confirm stack delete so taking no action.'))
+                return
+    except KeyboardInterrupt:  # ctrl-c
+        logger.info(_LI(
+            'User did not confirm stack delete (ctrl-c) so taking no action.'))
+        return
+    except EOFError:  # ctrl-d
+        logger.info(_LI(
+            'User did not confirm stack delete (ctrl-d) so taking no action.'))
+        return
 
     for sid in args.id:
         fields = {'stack_id': sid}
@@ -284,9 +326,11 @@ def do_stack_delete(hc, args):
         except exc.HTTPNotFound as e:
             failure_count += 1
             print(e)
-    if failure_count == len(args.id):
-        raise exc.CommandError(_("Unable to delete any of the specified "
-                               "stacks."))
+    if failure_count:
+        raise exc.CommandError(_("Unable to delete %(count)d of the %(total)d "
+                               "stacks.") %
+                               {'count': failure_count,
+                                'total': len(args.id)})
     do_stack_list(hc)
 
 
@@ -408,6 +452,8 @@ def do_stack_show(hc, args):
 @utils.arg('-y', '--dry-run', default=False, action="store_true",
            help='Do not actually perform the stack update, but show what '
            'would be changed')
+@utils.arg('-n', '--show-nested', default=False, action="store_true",
+           help='Show nested stacks when performing --dry-run')
 @utils.arg('-P', '--parameters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
            help=_('Parameter values used to create the stack. '
                   'This can be specified multiple times, or once with '
@@ -447,9 +493,9 @@ def do_stack_update(hc, args):
         args.template_object,
         _authenticated_fetcher(hc),
         existing=args.existing)
-
+    env_files_list = []
     env_files, env = template_utils.process_multiple_environments_and_files(
-        env_paths=args.environment_file)
+        env_paths=args.environment_file, env_list_tracker=env_files_list)
 
     if args.pre_update:
         template_utils.hooks_to_env(env, args.pre_update, 'pre-update')
@@ -465,6 +511,10 @@ def do_stack_update(hc, args):
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env
     }
+
+    # If one or more environments is found, pass the listing to the server
+    if env_files_list:
+        fields['environment_files'] = env_files_list
 
     if args.tags:
         fields['tags'] = args.tags
@@ -487,6 +537,9 @@ def do_stack_update(hc, args):
             fields['disable_rollback'] = False
 
     if args.dry_run is True:
+        if args.show_nested:
+            fields['show_nested'] = args.show_nested
+
         resource_changes = hc.stacks.preview_update(**fields)
 
         formatters = {
@@ -652,8 +705,9 @@ def do_output_list(hc, args):
            default='json')
 @utils.arg('-a', '--all', default=False, action='store_true',
            help=_('Display all stack outputs.'))
-@utils.arg('-v', '--only-value', default=False, action="store_true",
-           help=_('Returns only output value in specified format.'))
+@utils.arg('--with-detail', default=False, action="store_true",
+           help=_('Enable detail information presented, like '
+                  'key and description.'))
 def do_output_show(hc, args):
     """Show a specific stack output."""
     def resolve_output(output_key):
@@ -681,7 +735,14 @@ def do_output_show(hc, args):
         if 'output_error' in output['output']:
             msg = _("Output error: %s") % output['output']['output_error']
             raise exc.CommandError(msg)
-        if args.only_value:
+        if args.with_detail:
+            formatters = {
+                'output_value': (lambda x: utils.json_formatter(x)
+                                 if args.format == 'json'
+                                 else x)
+            }
+            utils.print_dict(output['output'], formatters=formatters)
+        else:
             if (args.format == 'json'
                     or isinstance(output['output']['output_value'], dict)
                     or isinstance(output['output']['output_value'], list)):
@@ -689,15 +750,11 @@ def do_output_show(hc, args):
                     utils.json_formatter(output['output']['output_value']))
             else:
                 print(output['output']['output_value'])
-        else:
-            formatters = {
-                'output_value': (lambda x: utils.json_formatter(x)
-                                 if args.format == 'json'
-                                 else x)
-            }
-            utils.print_dict(output['output'], formatters=formatters)
 
     if args.all:
+        if args.output:
+            raise exc.CommandError(
+                _("Can't specify an output name and the --all flag"))
         try:
             outputs = hc.stacks.output_list(args.id)
             resolved = False
@@ -799,6 +856,8 @@ def do_template_show(hc, args):
                   'This can be specified multiple times, or once with '
                   'parameters separated by a semicolon.'),
            action='append')
+@utils.arg('-I', '--ignore-errors', metavar='<ERR1,ERR2...>',
+           help=_('List of heat errors to ignore.'))
 def do_template_validate(hc, args):
     """Validate a template with parameters."""
 
@@ -808,14 +867,23 @@ def do_template_validate(hc, args):
         args.template_object,
         _authenticated_fetcher(hc))
 
+    env_files_list = []
     env_files, env = template_utils.process_multiple_environments_and_files(
-        env_paths=args.environment_file)
+        env_paths=args.environment_file, env_list_tracker=env_files_list)
+
     fields = {
         'template': template,
         'parameters': utils.format_parameters(args.parameters),
         'files': dict(list(tpl_files.items()) + list(env_files.items())),
         'environment': env,
     }
+
+    if args.ignore_errors:
+        fields['ignore_errors'] = args.ignore_errors
+
+    # If one or more environments is found, pass the listing to the server
+    if env_files_list:
+        fields['environment_files'] = env_files_list
 
     if args.show_nested:
         fields['show_nested'] = args.show_nested
@@ -831,12 +899,19 @@ def do_template_validate(hc, args):
 @utils.arg('--with-detail', default=False, action="store_true",
            help=_('Enable detail information presented for each resource '
                   'in resources list.'))
+@utils.arg('-f', '--filter', metavar='<KEY=VALUE>',
+           help=_('Filter parameters to apply on returned resources based on'
+                  ' their name, status, type, action, id and'
+                  ' physcial_resource_id. This can be specified multiple'
+                  ' times.'),
+           action='append')
 def do_resource_list(hc, args):
     '''Show list of resources belonging to a stack.'''
     fields = {
         'stack_id': args.id,
         'nested_depth': args.nested_depth,
         'with_detail': args.with_detail,
+        'filters': utils.format_parameters(args.filter)
     }
     try:
         resources = hc.resources.list(**fields)
@@ -956,6 +1031,28 @@ def do_resource_signal(hc, args):
 
 
 @utils.arg('id', metavar='<NAME or ID>',
+           help=_('Name or ID of stack the resource belongs to.'))
+@utils.arg('resource', metavar='<RESOURCE>',
+           help=_('Name of the resource.'))
+@utils.arg('reason', default="", nargs='?',
+           help=_('Reason for state change.'))
+@utils.arg('--reset', default=False, action="store_true",
+           help=_('Set the resource as healthy.'))
+def do_resource_mark_unhealthy(hc, args):
+    '''Set resource's health.'''
+    fields = {'stack_id': args.id,
+              'resource_name': args.resource,
+              'mark_unhealthy': not args.reset,
+              'resource_status_reason': args.reason}
+    try:
+        hc.resources.mark_unhealthy(**fields)
+    except exc.HTTPNotFound:
+        raise exc.CommandError(_('Stack or resource not found: '
+                                 '%(id)s %(resource)s') %
+                               {'id': args.id, 'resource': args.resource})
+
+
+@utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of the stack these resources belong to.'))
 @utils.arg('--pre-create', action='store_true', default=False,
            help=_('Clear the pre-create hooks (optional)'))
@@ -974,42 +1071,15 @@ def do_hook_clear(hc, args):
     elif args.pre_update:
         hook_type = 'pre-update'
     else:
-        hook_type = _get_hook_type_via_status(hc, args.id)
+        hook_type = hook_utils.get_hook_type_via_status(hc, args.id)
 
     for hook_string in args.hook:
         hook = [b for b in hook_string.split('/') if b]
         resource_pattern = hook[-1]
         stack_id = args.id
 
-        def clear_hook(stack_id, resource_name):
-            try:
-                hc.resources.signal(
-                    stack_id=stack_id,
-                    resource_name=resource_name,
-                    data={'unset_hook': hook_type})
-            except exc.HTTPNotFound:
-                logger.error(
-                    _LE("Stack %(stack)s or resource %(resource)s not found"),
-                    {'resource': resource_name, 'stack': stack_id})
-
-        def clear_wildcard_hooks(stack_id, stack_patterns):
-            if stack_patterns:
-                for resource in hc.resources.list(stack_id):
-                    res_name = resource.resource_name
-                    if fnmatch.fnmatchcase(res_name, stack_patterns[0]):
-                        nested_stack = hc.resources.get(
-                            stack_id=stack_id,
-                            resource_name=res_name)
-                        clear_wildcard_hooks(
-                            nested_stack.physical_resource_id,
-                            stack_patterns[1:])
-            else:
-                for resource in hc.resources.list(stack_id):
-                    res_name = resource.resource_name
-                    if fnmatch.fnmatchcase(res_name, resource_pattern):
-                        clear_hook(stack_id, res_name)
-
-        clear_wildcard_hooks(stack_id, hook[:-1])
+        hook_utils.clear_wildcard_hooks(hc, stack_id, hook[:-1],
+                                        hook_type, resource_pattern)
 
 
 @utils.arg('id', metavar='<NAME or ID>',
@@ -1077,29 +1147,6 @@ def do_event_list(hc, args):
         utils.print_list(events, display_fields, sortby_index=None)
 
 
-def _get_hook_type_via_status(hc, stack_id):
-    # Figure out if the hook should be pre-create or pre-update based
-    # on the stack status, also sanity assertions that we're in-progress.
-    try:
-        stack = hc.stacks.get(stack_id=stack_id)
-    except exc.HTTPNotFound:
-        raise exc.CommandError(_('Stack not found: %s') % stack_id)
-    else:
-        if 'IN_PROGRESS' not in stack.stack_status:
-            raise exc.CommandError(_('Stack status %s not IN_PROGRESS') %
-                                   stack.stack_status)
-
-    if 'CREATE' in stack.stack_status:
-        hook_type = 'pre-create'
-    elif 'UPDATE' in stack.stack_status:
-        hook_type = 'pre-update'
-    else:
-        raise exc.CommandError(_('Unexpected stack status %s, '
-                                 'only create/update supported')
-                               % stack.stack_status)
-    return hook_type
-
-
 @utils.arg('id', metavar='<NAME or ID>',
            help=_('Name or ID of stack to show the pending hooks for.'))
 @utils.arg('-n', '--nested-depth', metavar='<DEPTH>',
@@ -1129,7 +1176,7 @@ def do_hook_poll(hc, args):
     else:
         nested_depth = 0
 
-    hook_type = _get_hook_type_via_status(hc, args.id)
+    hook_type = hook_utils.get_hook_type_via_status(hc, args.id)
     event_args = {'sort_dir': 'asc'}
     hook_events = event_utils.get_hook_events(
         hc, stack_id=args.id, event_args=event_args,
@@ -1266,20 +1313,22 @@ def do_config_show(hc, args):
 
 
 @utils.arg('id', metavar='<ID>', nargs='+',
-           help=_('IDs of the configurations to delete.'))
+           help=_('ID of the configuration(s) to delete.'))
 def do_config_delete(hc, args):
-    '''Delete a software configuration.'''
+    '''Delete the software configuration(s).'''
     failure_count = 0
 
     for config_id in args.id:
         try:
             hc.software_configs.delete(config_id=config_id)
-        except exc.HTTPNotFound as e:
+        except exc.HTTPNotFound:
             failure_count += 1
-            print(e)
-    if failure_count == len(args.id):
-        raise exc.CommandError(_("Unable to delete any of the specified "
-                                 "configs."))
+            print(_('Software config with ID %s not found') % config_id)
+    if failure_count:
+        raise exc.CommandError(_("Unable to delete %(count)d of the %(total)d "
+                               "configs.") %
+                               {'count': failure_count,
+                                'total': len(args.id)})
 
 
 @utils.arg('-i', '--input-value', metavar='<KEY=VALUE>',
@@ -1377,9 +1426,9 @@ def do_deployment_metadata_show(hc, args):
 
 
 @utils.arg('id', metavar='<ID>', nargs='+',
-           help=_('IDs of the deployments to delete.'))
+           help=_('ID of the deployment(s) to delete.'))
 def do_deployment_delete(hc, args):
-    '''Delete software deployments.'''
+    '''Delete the software deployment(s).'''
     failure_count = 0
 
     for deploy_id in args.id:
@@ -1401,9 +1450,10 @@ def do_deployment_delete(hc, args):
                     '%(config_id)s of deployment %(deploy_id)s') %
                   {'config_id': config_id, 'deploy_id': deploy_id})
 
-    if failure_count == len(args.id):
-        raise exc.CommandError(_("Unable to delete any of the specified "
-                                 "deployments."))
+    if failure_count:
+        raise exc.CommandError(_("Unable to delete %(count)d of the %(total)d "
+                                 "deployments.") %
+                               {'count': failure_count, 'total': len(args.id)})
 
 
 @utils.arg('id', metavar='<ID>',
@@ -1575,39 +1625,7 @@ def _do_stack_show(hc, fields):
             'stack_status_reason': utils.text_wrap_formatter,
             'parameters': utils.json_formatter,
             'outputs': utils.json_formatter,
-            'links': utils.link_formatter
+            'links': utils.link_formatter,
+            'tags': utils.json_formatter
         }
         utils.print_dict(stack.to_dict(), formatters=formatters)
-
-
-def _poll_for_events(hc, stack_name, action, poll_period):
-    """Continuously poll events and logs for performed action on stack."""
-
-    fields = {'stack_id': stack_name}
-    _do_stack_show(hc, fields)
-    marker = None
-    while True:
-        events = event_utils.get_events(hc, stack_id=stack_name,
-                                        event_args={'sort_dir': 'asc',
-                                                    'marker': marker})
-
-        if len(events) >= 1:
-            # set marker to last event that was received.
-            marker = getattr(events[-1], 'id', None)
-            events_log = utils.event_log_formatter(events)
-            print(events_log)
-            for event in events:
-                # check if stack event was also received
-                if getattr(event, 'resource_name', '') == stack_name:
-                    stack_status = getattr(event, 'resource_status', '')
-                    msg = _("\n Stack %(name)s %(status)s \n") % dict(
-                        name=stack_name, status=stack_status)
-                    if stack_status == '%s_COMPLETE' % action:
-                        _do_stack_show(hc, fields)
-                        print(msg)
-                        return
-                    elif stack_status == '%s_FAILED' % action:
-                        _do_stack_show(hc, fields)
-                        raise exc.StackFailure(msg)
-
-        time.sleep(poll_period)

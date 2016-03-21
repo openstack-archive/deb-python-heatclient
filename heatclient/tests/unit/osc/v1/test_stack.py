@@ -12,15 +12,22 @@
 #
 
 import copy
+import io
 import mock
 import six
 import testscenarios
+import yaml
 
 from openstackclient.common import exceptions as exc
 from openstackclient.common import utils
 
+from heatclient.common import template_format
+from heatclient import exc as heat_exc
 from heatclient.osc.v1 import stack
+from heatclient.tests import inline_templates
 from heatclient.tests.unit.osc.v1 import fakes as orchestration_fakes
+from heatclient.v1 import events
+from heatclient.v1 import resources
 from heatclient.v1 import stacks
 
 load_tests = testscenarios.load_tests_apply_scenarios
@@ -122,7 +129,10 @@ class TestStackCreate(TestStack):
 
         self.stack_client.create.assert_called_with(**kwargs)
 
-    def test_stack_create_wait(self):
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('CREATE_COMPLETE',
+                              'Stack my_stack CREATE_COMPLETE'))
+    def test_stack_create_wait(self, mock_poll):
         arglist = ['my_stack', '-t', self.template_path, '--wait']
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
@@ -131,8 +141,9 @@ class TestStackCreate(TestStack):
         self.stack_client.create.assert_called_with(**self.defaults)
         self.stack_client.get.assert_called_with(**{'stack_id': '1234'})
 
-    @mock.patch('openstackclient.common.utils.wait_for_status',
-                return_value=False)
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('CREATE_FAILED',
+                              'Stack my_stack CREATE_FAILED'))
     def test_stack_create_wait_fail(self, mock_wait):
         arglist = ['my_stack', '-t', self.template_path, '--wait']
         parsed_args = self.check_parser(self.cmd, arglist, [])
@@ -304,20 +315,30 @@ class TestStackUpdate(TestStack):
         self.stack_client.preview_update.assert_called_with(**self.defaults)
         self.stack_client.update.assert_not_called()
 
-    def test_stack_update_wait(self):
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('UPDATE_COMPLETE',
+                              'Stack my_stack UPDATE_COMPLETE'))
+    @mock.patch('heatclient.common.event_utils.get_events', return_value=[])
+    def test_stack_update_wait(self, ge, mock_poll):
         arglist = ['my_stack', '-t', self.template_path, '--wait']
         parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.stack_client.get.return_value = mock.MagicMock(
+            stack_name='my_stack')
 
         self.cmd.take_action(parsed_args)
 
         self.stack_client.update.assert_called_with(**self.defaults)
         self.stack_client.get.assert_called_with(**{'stack_id': 'my_stack'})
 
-    @mock.patch('openstackclient.common.utils.wait_for_status',
-                return_value=False)
-    def test_stack_update_wait_fail(self, mock_wait):
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('UPDATE_FAILED',
+                              'Stack my_stack UPDATE_FAILED'))
+    @mock.patch('heatclient.common.event_utils.get_events', return_value=[])
+    def test_stack_update_wait_fail(self, ge, mock_poll):
         arglist = ['my_stack', '-t', self.template_path, '--wait']
         parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.stack_client.get.return_value = mock.MagicMock(
+            stack_name='my_stack')
 
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
 
@@ -520,3 +541,727 @@ class TestStackList(TestStack):
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+
+class TestStackDelete(TestStack):
+
+    def setUp(self):
+        super(TestStackDelete, self).setUp()
+        self.cmd = stack.DeleteStack(self.app, None)
+        self.stack_client.delete = mock.MagicMock()
+        self.stack_client.get = mock.MagicMock(
+            side_effect=heat_exc.HTTPNotFound)
+
+    def test_stack_delete(self):
+        arglist = ['stack1', 'stack2', 'stack3']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.cmd.take_action(parsed_args)
+
+        self.stack_client.delete.assert_any_call('stack1')
+        self.stack_client.delete.assert_any_call('stack2')
+        self.stack_client.delete.assert_any_call('stack3')
+
+    def test_stack_delete_not_found(self):
+        arglist = ['my_stack']
+        self.stack_client.delete.side_effect = heat_exc.HTTPNotFound
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+    def test_stack_delete_one_found_one_not_found(self):
+        arglist = ['stack1', 'stack2']
+        self.stack_client.delete.side_effect = [None, heat_exc.HTTPNotFound]
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+
+        self.stack_client.delete.assert_any_call('stack1')
+        self.stack_client.delete.assert_any_call('stack2')
+        self.assertEqual('Unable to delete 1 of the 2 stacks.', str(error))
+
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('DELETE_COMPLETE',
+                              'Stack my_stack DELETE_COMPLETE'))
+    @mock.patch('heatclient.common.event_utils.get_events', return_value=[])
+    def test_stack_delete_wait(self, mock_get_event, mock_poll, ):
+        arglist = ['stack1', 'stack2', 'stack3', '--wait']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.cmd.take_action(parsed_args)
+        self.stack_client.delete.assert_any_call('stack1')
+        self.stack_client.delete.assert_any_call('stack2')
+        self.stack_client.delete.assert_any_call('stack3')
+
+    @mock.patch('heatclient.common.event_utils.poll_for_events')
+    @mock.patch('heatclient.common.event_utils.get_events', return_value=[])
+    def test_stack_delete_wait_fail(self, mock_get_event, mock_poll):
+        mock_poll.side_effect = [['DELETE_COMPLETE',
+                                  'Stack my_stack DELETE_COMPLETE'],
+                                 ['DELETE_FAILED',
+                                  'Stack my_stack DELETE_FAILED'],
+                                 ['DELETE_COMPLETE',
+                                  'Stack my_stack DELETE_COMPLETE']]
+        arglist = ['stack1', 'stack2', 'stack3', '--wait']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.stack_client.delete.assert_any_call('stack1')
+        self.stack_client.delete.assert_any_call('stack2')
+        self.stack_client.delete.assert_any_call('stack3')
+        self.assertEqual('Unable to delete 1 of the 3 stacks.', str(error))
+
+    @mock.patch('sys.stdin', spec=six.StringIO)
+    def test_stack_delete_prompt(self, mock_stdin):
+        arglist = ['my_stack']
+        mock_stdin.isatty.return_value = True
+        mock_stdin.readline.return_value = 'y'
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.cmd.take_action(parsed_args)
+
+        mock_stdin.readline.assert_called_with()
+        self.stack_client.delete.assert_called_with('my_stack')
+
+    @mock.patch('sys.stdin', spec=six.StringIO)
+    def test_stack_delete_prompt_no(self, mock_stdin):
+        arglist = ['my_stack']
+        mock_stdin.isatty.return_value = True
+        mock_stdin.readline.return_value = 'n'
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.cmd.take_action(parsed_args)
+
+        mock_stdin.readline.assert_called_with()
+        self.stack_client.delete.assert_not_called()
+
+
+class TestStackAdopt(TestStack):
+
+    adopt_file = 'heatclient/tests/test_templates/adopt.json'
+
+    with open(adopt_file, 'r') as f:
+        adopt_data = f.read()
+
+    defaults = {
+        'stack_name': 'my_stack',
+        'disable_rollback': True,
+        'adopt_stack_data': adopt_data,
+        'parameters': {},
+        'files': {},
+        'environment': {},
+        'timeout': None
+    }
+
+    def setUp(self):
+        super(TestStackAdopt, self).setUp()
+        self.cmd = stack.AdoptStack(self.app, None)
+        self.stack_client.create = mock.MagicMock(
+            return_value={'stack': {'id': '1234'}})
+
+    def test_stack_adopt_defaults(self):
+        arglist = ['my_stack', '--adopt-file', self.adopt_file]
+        cols = ['id', 'stack_name', 'description', 'creation_time',
+                'updated_time', 'stack_status', 'stack_status_reason']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, data = self.cmd.take_action(parsed_args)
+
+        self.stack_client.create.assert_called_with(**self.defaults)
+        self.assertEqual(cols, columns)
+
+    def test_stack_adopt_enable_rollback(self):
+        arglist = ['my_stack', '--adopt-file', self.adopt_file,
+                   '--enable-rollback']
+        kwargs = copy.deepcopy(self.defaults)
+        kwargs['disable_rollback'] = False
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.cmd.take_action(parsed_args)
+
+        self.stack_client.create.assert_called_with(**kwargs)
+
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('ADOPT_COMPLETE',
+                              'Stack my_stack ADOPT_COMPLETE'))
+    def test_stack_adopt_wait(self, mock_poll):
+        arglist = ['my_stack', '--adopt-file', self.adopt_file, '--wait']
+        self.stack_client.get = mock.MagicMock(return_value=(
+            stacks.Stack(None, {'stack_status': 'ADOPT_COMPLETE'})))
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.cmd.take_action(parsed_args)
+
+        self.stack_client.create.assert_called_with(**self.defaults)
+        self.stack_client.get.assert_called_with(**{'stack_id': '1234'})
+
+    @mock.patch('heatclient.common.event_utils.poll_for_events',
+                return_value=('ADOPT_FAILED',
+                              'Stack my_stack ADOPT_FAILED'))
+    def test_stack_adopt_wait_fail(self, mock_poll):
+        arglist = ['my_stack', '--adopt-file', self.adopt_file, '--wait']
+        self.stack_client.get = mock.MagicMock(return_value=(
+            stacks.Stack(None, {'stack_status': 'ADOPT_FAILED'})))
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+
+class TestStackAbandon(TestStack):
+
+    columns = ['stack_name', 'stack_status', 'id']
+    data = ['my_stack', 'ABANDONED', '1234']
+
+    response = dict(zip(columns, data))
+
+    def setUp(self):
+        super(TestStackAbandon, self).setUp()
+        self.cmd = stack.AbandonStack(self.app, None)
+        self.stack_client.abandon = mock.MagicMock(return_value=self.response)
+
+    def test_stack_abandon(self):
+        arglist = ['my_stack']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, data = self.cmd.take_action(parsed_args)
+
+        for column in self.columns:
+            self.assertIn(column, columns)
+        for datum in self.data:
+            self.assertIn(datum, data)
+
+    def test_stack_abandon_not_found(self):
+        arglist = ['my_stack']
+        self.stack_client.abandon.side_effect = heat_exc.HTTPNotFound
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+    @mock.patch('heatclient.osc.v1.stack.open', create=True)
+    def test_stack_abandon_output_file(self, mock_open):
+        arglist = ['my_stack', '--output-file', 'file.json']
+        mock_open.return_value = mock.MagicMock(spec=io.IOBase)
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, data = self.cmd.take_action(parsed_args)
+
+        mock_open.assert_called_once_with('file.json', 'w')
+        self.assertEqual([], columns)
+        self.assertIsNone(data)
+
+    @mock.patch('heatclient.osc.v1.stack.open', create=True,
+                side_effect=IOError)
+    def test_stack_abandon_output_file_error(self, mock_open):
+        arglist = ['my_stack', '--output-file', 'file.json']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+
+class TestStackOutputShow(TestStack):
+
+    outputs = [
+        {'output_key': 'output1', 'output_value': 'value1'},
+        {'output_key': 'output2', 'output_value': 'value2',
+         'output_error': 'error'}
+    ]
+
+    response = {
+        'outputs': outputs,
+        'stack_name': 'my_stack'
+    }
+
+    def setUp(self):
+        super(TestStackOutputShow, self).setUp()
+        self.cmd = stack.OutputShowStack(self.app, None)
+        self.stack_client.get = mock.MagicMock(
+            return_value=stacks.Stack(None, self.response))
+
+    def test_stack_output_show_no_output(self):
+        arglist = ['my_stack']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.assertEqual('Either <OUTPUT NAME> or --all must be specified.',
+                         str(error))
+
+    def test_stack_output_show_output_and_all(self):
+        arglist = ['my_stack', 'output1', '--all']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.assertEqual('Cannot specify both <OUTPUT NAME> and --all.',
+                         str(error))
+
+    def test_stack_output_show_all(self):
+        arglist = ['my_stack', '--all']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, outputs = self.cmd.take_action(parsed_args)
+
+        self.stack_client.get.assert_called_with('my_stack')
+        self.assertEqual(['output1', 'output2'], columns)
+
+    def test_stack_output_show_output(self):
+        arglist = ['my_stack', 'output1']
+        self.stack_client.output_show = mock.MagicMock(
+            return_value={'output': self.outputs[0]})
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, outputs = self.cmd.take_action(parsed_args)
+
+        self.stack_client.output_show.assert_called_with('my_stack', 'output1')
+        self.assertEqual(('output_key', 'output_value'), columns)
+        self.assertEqual(('output1', 'value1'), outputs)
+
+    def test_stack_output_show_not_found(self):
+        arglist = ['my_stack', '--all']
+        self.stack_client.get.side_effect = heat_exc.HTTPNotFound
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.assertEqual('Stack not found: my_stack', str(error))
+
+    def test_stack_output_show_output_error(self):
+        arglist = ['my_stack', 'output2']
+        self.stack_client.output_show = mock.MagicMock(
+            return_value={'output': self.outputs[1]})
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.assertEqual('Output error: error', str(error))
+        self.stack_client.output_show.assert_called_with('my_stack', 'output2')
+
+    def test_stack_output_show_bad_output(self):
+        arglist = ['my_stack', 'output3']
+        self.stack_client.output_show.side_effect = heat_exc.HTTPNotFound
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.assertEqual('Stack my_stack or output output3 not found.',
+                         str(error))
+        self.stack_client.output_show.assert_called_with('my_stack', 'output3')
+
+
+class TestStackOutputList(TestStack):
+
+    response = {'outputs': [{'output_key': 'key1', 'description': 'desc1'},
+                            {'output_key': 'key2', 'description': 'desc2'}]}
+
+    def setUp(self):
+        super(TestStackOutputList, self).setUp()
+        self.cmd = stack.OutputListStack(self.app, None)
+
+    def test_stack_output_list(self):
+        arglist = ['my_stack']
+        self.stack_client.output_list.return_value = self.response
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, data = self.cmd.take_action(parsed_args)
+
+        self.assertEqual(['output_key', 'description'], columns)
+        self.stack_client.output_list.assert_called_with('my_stack')
+
+    def test_stack_output_list_not_found(self):
+        arglist = ['my_stack']
+        self.stack_client.output_list.side_effect = heat_exc.HTTPNotFound
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action, parsed_args)
+        self.assertEqual('Stack not found: my_stack', str(error))
+
+
+class TestStackTemplateShow(TestStack):
+
+    fields = ['heat_template_version', 'description', 'parameter_groups',
+              'parameters', 'resources', 'outputs']
+
+    def setUp(self):
+        super(TestStackTemplateShow, self).setUp()
+        self.cmd = stack.TemplateShowStack(self.app, None)
+
+    def test_stack_template_show_full_template(self):
+        arglist = ['my_stack']
+        self.stack_client.template = mock.MagicMock(
+            return_value=yaml.load(inline_templates.FULL_TEMPLATE,
+                                   Loader=template_format.yaml_loader))
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, outputs = self.cmd.take_action(parsed_args)
+
+        for f in self.fields:
+            self.assertIn(f, columns)
+
+    def test_stack_template_show_short_template(self):
+        arglist = ['my_stack']
+        self.stack_client.template = mock.MagicMock(
+            return_value=yaml.load(inline_templates.SHORT_TEMPLATE,
+                                   Loader=template_format.yaml_loader))
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, outputs = self.cmd.take_action(parsed_args)
+
+        for f in ['heat_template_version', 'resources']:
+            self.assertIn(f, columns)
+
+    def test_stack_template_show_not_found(self):
+        arglist = ['my_stack']
+        self.stack_client.template = mock.MagicMock(
+            side_effect=heat_exc.HTTPNotFound)
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+
+class _TestStackCheckBase(object):
+
+    stack = stacks.Stack(None, {
+        "id": '1234',
+        "stack_name": 'my_stack',
+        "creation_time": "2013-08-04T20:57:55Z",
+        "updated_time": "2013-08-04T20:57:55Z",
+        "stack_status": "CREATE_COMPLETE"
+    })
+
+    columns = ['ID', 'Stack Name', 'Stack Status', 'Creation Time',
+               'Updated Time']
+
+    def _setUp(self, cmd, action, action_name=None):
+        self.cmd = cmd
+        self.action = action
+        self.mock_client.stacks.get = mock.Mock(
+            return_value=self.stack)
+        self.action_name = action_name
+
+    def _test_stack_action(self, get_call_count=1):
+        arglist = ['my_stack']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        columns, rows = self.cmd.take_action(parsed_args)
+        self.action.assert_called_once_with('my_stack')
+        self.mock_client.stacks.get.assert_called_with('my_stack')
+        self.assertEqual(get_call_count,
+                         self.mock_client.stacks.get.call_count)
+        self.assertEqual(self.columns, columns)
+        self.assertEqual(1, len(rows))
+
+    def _test_stack_action_multi(self, get_call_count=2):
+        arglist = ['my_stack1', 'my_stack2']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        columns, rows = self.cmd.take_action(parsed_args)
+        self.assertEqual(2, self.action.call_count)
+        self.assertEqual(get_call_count,
+                         self.mock_client.stacks.get.call_count)
+        self.action.assert_called_with('my_stack2')
+        self.mock_client.stacks.get.assert_called_with('my_stack2')
+        self.assertEqual(self.columns, columns)
+        self.assertEqual(2, len(rows))
+
+    @mock.patch('heatclient.common.event_utils.poll_for_events')
+    @mock.patch('heatclient.common.event_utils.get_events', return_value=[])
+    def _test_stack_action_wait(self, ge, mock_poll):
+        arglist = ['my_stack', '--wait']
+        mock_poll.return_value = (
+            '%s_COMPLETE' % self.action_name,
+            'Stack my_stack %s_COMPLETE' % self.action_name
+        )
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        columns, rows = self.cmd.take_action(parsed_args)
+        self.action.assert_called_with('my_stack')
+        self.mock_client.stacks.get.assert_called_with('my_stack')
+        self.assertEqual(self.columns, columns)
+        self.assertEqual(1, len(rows))
+
+    @mock.patch('heatclient.common.event_utils.poll_for_events')
+    @mock.patch('heatclient.common.event_utils.get_events', return_value=[])
+    def _test_stack_action_wait_error(self, ge, mock_poll):
+        arglist = ['my_stack', '--wait']
+        mock_poll.return_value = (
+            '%s_FAILED' % self.action_name,
+            'Error waiting for status from stack my_stack'
+        )
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action,
+                                  parsed_args)
+        self.assertEqual('Error waiting for status from stack my_stack',
+                         str(error))
+
+    def _test_stack_action_exception(self):
+        self.action.side_effect = heat_exc.HTTPNotFound
+        arglist = ['my_stack']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        error = self.assertRaises(exc.CommandError,
+                                  self.cmd.take_action,
+                                  parsed_args)
+        self.assertEqual('Stack not found: my_stack',
+                         str(error))
+
+
+class TestStackSuspend(_TestStackCheckBase, TestStack):
+
+    def setUp(self):
+        super(TestStackSuspend, self).setUp()
+        self.mock_client.actions.suspend = mock.Mock()
+        self._setUp(
+            stack.SuspendStack(self.app, None),
+            self.mock_client.actions.suspend,
+            'SUSPEND'
+        )
+
+    def test_stack_suspend(self):
+        self._test_stack_action()
+
+    def test_stack_suspend_multi(self):
+        self._test_stack_action_multi()
+
+    def test_stack_suspend_wait(self):
+        self._test_stack_action_wait()
+
+    def test_stack_suspend_wait_error(self):
+        self._test_stack_action_wait_error()
+
+    def test_stack_suspend_exception(self):
+        self._test_stack_action_exception()
+
+
+class TestStackResume(_TestStackCheckBase, TestStack):
+
+    def setUp(self):
+        super(TestStackResume, self).setUp()
+        self.mock_client.actions.resume = mock.Mock()
+        self._setUp(
+            stack.ResumeStack(self.app, None),
+            self.mock_client.actions.resume,
+            'RESUME'
+        )
+
+    def test_stack_resume(self):
+        self._test_stack_action()
+
+    def test_stack_resume_multi(self):
+        self._test_stack_action_multi()
+
+    def test_stack_resume_wait(self):
+        self._test_stack_action_wait()
+
+    def test_stack_resume_wait_error(self):
+        self._test_stack_action_wait_error()
+
+    def test_stack_resume_exception(self):
+        self._test_stack_action_exception()
+
+
+class TestStackCancel(_TestStackCheckBase, TestStack):
+
+    stack_update_in_progress = stacks.Stack(None, {
+        "id": '1234',
+        "stack_name": 'my_stack',
+        "creation_time": "2013-08-04T20:57:55Z",
+        "updated_time": "2013-08-04T20:57:55Z",
+        "stack_status": "UPDATE_IN_PROGRESS"
+    })
+
+    def setUp(self):
+        super(TestStackCancel, self).setUp()
+        self.mock_client.actions.cancel_update = mock.Mock()
+        self._setUp(
+            stack.CancelStack(self.app, None),
+            self.mock_client.actions.cancel_update,
+            'ROLLBACK'
+        )
+        self.mock_client.stacks.get = mock.Mock(
+            return_value=self.stack_update_in_progress)
+
+    def test_stack_cancel(self):
+        self._test_stack_action(2)
+
+    def test_stack_cancel_multi(self):
+        self._test_stack_action_multi(4)
+
+    def test_stack_cancel_wait(self):
+        self._test_stack_action_wait()
+
+    def test_stack_cancel_wait_error(self):
+        self._test_stack_action_wait_error()
+
+    def test_stack_cancel_exception(self):
+        self._test_stack_action_exception()
+
+    def test_stack_cancel_unsupported_state(self):
+        self.mock_client.stacks.get = mock.Mock(
+            return_value=self.stack)
+        error = self.assertRaises(exc.CommandError,
+                                  self._test_stack_action,
+                                  2)
+        self.assertEqual('Stack my_stack with status \'create_complete\' '
+                         'not in cancelable state',
+                         str(error))
+
+
+class TestStackCheck(_TestStackCheckBase, TestStack):
+
+    def setUp(self):
+        super(TestStackCheck, self).setUp()
+        self.mock_client.actions.check = mock.Mock()
+        self._setUp(
+            stack.CheckStack(self.app, None),
+            self.mock_client.actions.check,
+            'CHECK'
+        )
+
+    def test_stack_check(self):
+        self._test_stack_action()
+
+    def test_stack_check_multi(self):
+        self._test_stack_action_multi()
+
+    def test_stack_check_wait(self):
+        self._test_stack_action_wait()
+
+    def test_stack_check_wait_error(self):
+        self._test_stack_action_wait_error()
+
+    def test_stack_check_exception(self):
+        self._test_stack_action_exception()
+
+
+class TestStackHookPoll(TestStack):
+
+    stack = stacks.Stack(None, {
+        "id": '1234',
+        "stack_name": 'my_stack',
+        "creation_time": "2013-08-04T20:57:55Z",
+        "updated_time": "2013-08-04T20:57:55Z",
+        "stack_status": "CREATE_IN_PROGRESS"
+    })
+    resource = resources.Resource(None, {
+        'resource_name': 'resource1',
+        'links': [{'href': 'http://heat.example.com:8004/resource1',
+                   'rel': 'self'},
+                  {'href': 'http://192.168.27.100:8004/my_stack',
+                   'rel': 'stack'}],
+        'logical_resource_id': 'random_group',
+        'creation_time': '2015-12-03T16:50:56',
+        'resource_status': 'INIT_COMPLETE',
+        'updated_time': '2015-12-03T16:50:56',
+        'required_by': [],
+        'resource_status_reason': '',
+        'physical_resource_id': '',
+        'resource_type': 'OS::Heat::ResourceGroup',
+        'id': '1111'
+    })
+    columns = ['ID', 'Resource Status Reason', 'Resource Status',
+               'Event Time']
+    event0 = events.Event(manager=None, info={
+        'resource_name': 'my_stack',
+        'event_time': '2015-12-02T16:50:56',
+        'logical_resource_id': 'my_stack',
+        'resource_status': 'CREATE_IN_PROGRESS',
+        'resource_status_reason': 'Stack CREATE started',
+        'id': '1234'
+    })
+    event1 = events.Event(manager=None, info={
+        'resource_name': 'resource1',
+        'event_time': '2015-12-03T19:59:58',
+        'logical_resource_id': 'resource1',
+        'resource_status': 'INIT_COMPLETE',
+        'resource_status_reason':
+            'CREATE paused until Hook pre-create is cleared',
+        'id': '1111'
+    })
+    row1 = ('resource1',
+            '1111',
+            'CREATE paused until Hook pre-create is cleared',
+            'INIT_COMPLETE',
+            '2015-12-03T19:59:58'
+            )
+
+    def setUp(self):
+        super(TestStackHookPoll, self).setUp()
+        self.cmd = stack.StackHookPoll(self.app, None)
+        self.mock_client.stacks.get = mock.Mock(
+            return_value=self.stack)
+        self.mock_client.events.list = mock.Mock(
+            return_value=[self.event0, self.event1])
+        self.mock_client.resources.list = mock.Mock(
+            return_value=[self.resource])
+
+    def test_hook_poll(self):
+        expected_columns = ['Resource Name'] + self.columns
+        expected_rows = [self.row1]
+        arglist = ['my_stack']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        columns, rows = self.cmd.take_action(parsed_args)
+        self.assertEqual(expected_rows, list(rows))
+        self.assertEqual(expected_columns, columns)
+
+    def test_hook_poll_nested(self):
+        expected_columns = ['Resource Name'] + self.columns + ['Stack Name']
+        expected_rows = [self.row1 + ('my_stack',)]
+        arglist = ['my_stack', '--nested-depth=10']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        columns, rows = self.cmd.take_action(parsed_args)
+        self.assertEqual(expected_rows, list(rows))
+        self.assertEqual(expected_columns, columns)
+
+    def test_hook_poll_nested_invalid(self):
+        arglist = ['my_stack', '--nested-depth=ugly']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
+
+class TestStackHookClear(TestStack):
+
+    stack = stacks.Stack(None, {
+        "id": '1234',
+        "stack_name": 'my_stack',
+        "creation_time": "2013-08-04T20:57:55Z",
+        "updated_time": "2013-08-04T20:57:55Z",
+        "stack_status": "CREATE_IN_PROGRESS"
+    })
+    resource = resources.Resource(None, {
+        'stack_id': 'my_stack',
+        'resource_name': 'resource'
+    })
+
+    def setUp(self):
+        super(TestStackHookClear, self).setUp()
+        self.cmd = stack.StackHookClear(self.app, None)
+        self.mock_client.stacks.get = mock.Mock(
+            return_value=self.stack)
+        self.mock_client.resources.signal = mock.Mock()
+        self.mock_client.resources.list = mock.Mock(
+            return_value=[self.resource])
+
+    def test_hook_clear(self):
+        arglist = ['my_stack', 'resource']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.cmd.take_action(parsed_args)
+        self.mock_client.resources.signal.assert_called_once_with(
+            data={'unset_hook': 'pre-create'},
+            resource_name='resource',
+            stack_id='my_stack')
+
+    def test_hook_clear_pre_create(self):
+        arglist = ['my_stack', 'resource', '--pre-create']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.cmd.take_action(parsed_args)
+        self.mock_client.resources.signal.assert_called_once_with(
+            data={'unset_hook': 'pre-create'},
+            resource_name='resource',
+            stack_id='my_stack')
+
+    def test_hook_clear_pre_update(self):
+        arglist = ['my_stack', 'resource', '--pre-update']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.cmd.take_action(parsed_args)
+        self.mock_client.resources.signal.assert_called_once_with(
+            data={'unset_hook': 'pre-update'},
+            resource_name='resource',
+            stack_id='my_stack')
