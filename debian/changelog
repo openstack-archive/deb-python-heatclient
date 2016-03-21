@@ -1,4 +1,4 @@
-python-heatclient (0.9.0-1) UNRELEASED; urgency=medium
+python-heatclient (1.0.0-1) experimental; urgency=medium
 
   [ David Della Vecchia ]
   * New upstream release.
@@ -8,7 +8,10 @@ python-heatclient (0.9.0-1) UNRELEASED; urgency=medium
   [ Ondřej Nový ]
   * Fixed VCS URLs (https).
 
- -- David Della Vecchia <ddv@canonical.com>  Mon, 22 Feb 2016 17:04:05 -0500
+  [ Thomas Goirand ]
+  * New upstream release.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 21 Mar 2016 11:58:30 +0100
 
 python-heatclient (0.8.0-3) unstable; urgency=medium
 
