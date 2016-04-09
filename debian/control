@@ -65,7 +65,7 @@ Build-Depends-Indep: lsb-release,
                      python3-yaml,
                      subunit,
                      testrepository,
-Standards-Version: 3.9.7
+Standards-Version: 3.9.8
 Vcs-Browser: https://anonscm.debian.org/cgit/openstack/python-heatclient.git/
 Vcs-Git: https://anonscm.debian.org/git/openstack/python-heatclient.git
 Homepage: https://github.com/openstack/python-heatclient
