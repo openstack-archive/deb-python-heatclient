@@ -1,8 +1,12 @@
-python-heatclient (1.1.0-2) UNRELEASED; urgency=medium
+python-heatclient (1.2.0-1) UNRELEASED; urgency=medium
 
+  [ Ondřej Nový ]
   * Standards-Version is 3.9.8 now (no change)
 
- -- Ondřej Nový <novy@ondrej.org>  Sat, 09 Apr 2016 19:27:11 +0200
+  [ Corey Bryant ]
+  * New upstream release.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Fri, 03 Jun 2016 15:44:46 -0400
 
 python-heatclient (1.1.0-1) experimental; urgency=medium
 
