@@ -5,6 +5,7 @@ python-heatclient (1.2.0-1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream release.
+  * d/gbp.conf: Update branch for Newton.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Fri, 03 Jun 2016 15:44:46 -0400
 
