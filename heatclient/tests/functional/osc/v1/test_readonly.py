@@ -10,15 +10,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
 import yaml
 
 from tempest_lib import exceptions
 
-from heatclient.tests.functional import base
+from heatclient.tests.functional.osc.v1 import base
 
 
-class SimpleReadOnlyOpenStackClientTest(base.ClientTestBase):
+class SimpleReadOnlyOpenStackClientTest(base.OpenStackClientTestBase):
     """Basic, read-only tests for Openstack CLI client heat plugin.
 
     Basic smoke test for the openstack CLI commands which do not require
@@ -92,15 +91,13 @@ class SimpleReadOnlyOpenStackClientTest(base.ClientTestBase):
         self.assertIsInstance(yaml.load(rsrc_schema), dict)
 
     def _template_validate(self, templ_name, parms):
-        heat_template_path = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            '../../templates/%s' % templ_name)
+        heat_template_path = self.get_template_path(templ_name)
         cmd = 'stack create test-stack --dry-run --template %s'\
               % heat_template_path
         for parm in parms:
             cmd += ' --parameter ' + parm
         ret = self.openstack(cmd)
-        self.assertRegexpMatches(ret, r'stack_name.*|.*test_stack')
+        self.assertRegex(ret, r'stack_name.*|.*test_stack')
 
     def test_heat_template_validate_yaml(self):
         self._template_validate(
