@@ -1,4 +1,4 @@
-python-heatclient (1.2.0-1) UNRELEASED; urgency=medium
+python-heatclient (1.2.0-1) experimental; urgency=medium
 
   [ Ondřej Nový ]
   * Standards-Version is 3.9.8 now (no change)
@@ -7,7 +7,13 @@ python-heatclient (1.2.0-1) UNRELEASED; urgency=medium
   * New upstream release.
   * d/gbp.conf: Update branch for Newton.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Fri, 03 Jun 2016 15:44:46 -0400
+ -- Thomas Goirand <zigo@debian.org>  Sun, 05 Jun 2016 16:08:56 +0000
+
+python-heatclient (1.1.0-2) unstable; urgency=medium
+
+  * Uploading to unstable.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 04 Apr 2016 13:01:16 +0000
 
 python-heatclient (1.1.0-1) experimental; urgency=medium
 
