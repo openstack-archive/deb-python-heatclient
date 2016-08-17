@@ -1,0 +1,11 @@
+Code-Review+2: Sergey Kraynev <skraynev@mirantis.com>
+Code-Review+1: Clint Adams <clint@gcfm.net>
+Code-Review+1: Brandon Palm <bapalm@us.ibm.com>
+Code-Review+2: Thierry Carrez <thierry@openstack.org>
+Workflow+1: Thierry Carrez <thierry@openstack.org>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 29 Mar 2016 10:31:24 +0000
+Reviewed-on: https://review.openstack.org/297151
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/stable/mitaka

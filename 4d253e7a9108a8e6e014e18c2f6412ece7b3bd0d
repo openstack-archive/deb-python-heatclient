@@ -1,0 +1,9 @@
+Code-Review+2: Sergey Kraynev <skraynev@mirantis.com>
+Code-Review+2: Steve Baker <sbaker@redhat.com>
+Workflow+1: Steve Baker <sbaker@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 29 Mar 2016 03:37:04 +0000
+Reviewed-on: https://review.openstack.org/296768
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/stable/mitaka
