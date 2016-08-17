@@ -1,0 +1,10 @@
+Code-Review+2: Steven Hardy <shardy@redhat.com>
+Code-Review+2: Pavlo Shchelokovskyy <pshchelokovskyy@mirantis.com>
+Code-Review+2: Thomas Herve <therve@redhat.com>
+Workflow+1: Thomas Herve <therve@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 24 Jun 2016 11:01:23 +0000
+Reviewed-on: https://review.openstack.org/280963
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
