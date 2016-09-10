@@ -1,0 +1,8 @@
+Code-Review+2: Steve Baker <sbaker@redhat.com>
+Workflow+1: Steve Baker <sbaker@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sun, 15 May 2016 22:39:40 +0000
+Reviewed-on: https://review.openstack.org/316478
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/stable/mitaka
