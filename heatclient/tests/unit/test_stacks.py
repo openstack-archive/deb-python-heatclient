@@ -9,12 +9,13 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from heatclient.v1 import stacks
 
 import mock
 import testscenarios
 from testscenarios import scenarios as scnrs
 import testtools
+
+from heatclient.v1 import stacks
 
 load_tests = testscenarios.load_tests_apply_scenarios
 
@@ -149,6 +150,18 @@ class StackOperationsTest(testtools.TestCase):
         stack.output_show('out123')
         manager.output_show.assert_called_once_with('the_stack/abcd1234',
                                                     'out123')
+
+    def test_environment_show(self):
+        manager = mock.MagicMock()
+        stack = mock_stack(manager, 'env_stack', 'env1')
+        stack.environment()
+        manager.environment.assert_called_once_with('env_stack/env1')
+
+    def test_files_show(self):
+        manager = mock.MagicMock()
+        stack = mock_stack(manager, 'files_stack', 'files1')
+        stack.files()
+        manager.files.assert_called_once_with('files_stack/files1')
 
 
 class StackManagerNoPaginationTest(testtools.TestCase):

@@ -14,14 +14,15 @@
 """Orchestration v1 resource type implementations"""
 
 import logging
+
+from osc_lib.command import command
+from osc_lib import exceptions as exc
+from osc_lib.i18n import _
 import six
 
-from cliff import lister
 from heatclient.common import format_utils
 from heatclient.common import utils as heat_utils
 from heatclient import exc as heat_exc
-from openstackclient.common import exceptions as exc
-from openstackclient.i18n import _
 
 
 class ResourceTypeShow(format_utils.YamlFormat):
@@ -42,10 +43,20 @@ class ResourceTypeShow(format_utils.YamlFormat):
             metavar='<template-type>',
             help=_('Optional template type to generate, hot or cfn')
         )
+        parser.add_argument(
+            '--long',
+            default=False,
+            action='store_true',
+            help=_('Show resource type with corresponding description.')
+        )
         return parser
 
     def take_action(self, parsed_args):
         self.log.debug("take_action(%s)", parsed_args)
+
+        if parsed_args.template_type is not None and parsed_args.long:
+            msg = _('Cannot use --template-type and --long in one time.')
+            raise exc.CommandError(msg)
 
         heat_client = self.app.client_manager.orchestration
         return _show_resourcetype(heat_client, parsed_args)
@@ -63,7 +74,8 @@ def _show_resourcetype(heat_client, parsed_args):
                       'template_type': template_type}
             data = heat_client.resource_types.generate_template(**fields)
         else:
-            data = heat_client.resource_types.get(parsed_args.resource_type)
+            data = heat_client.resource_types.get(parsed_args.resource_type,
+                                                  parsed_args.long)
     except heat_exc.HTTPNotFound:
         raise exc.CommandError(
             _('Resource type not found: %s') % parsed_args.resource_type)
@@ -73,7 +85,7 @@ def _show_resourcetype(heat_client, parsed_args):
     return columns, rows
 
 
-class ResourceTypeList(lister.Lister):
+class ResourceTypeList(command.Lister):
     """List resource types."""
 
     log = logging.getLogger(__name__ + '.ResourceTypeList')
@@ -90,6 +102,13 @@ class ResourceTypeList(lister.Lister):
                    'name, version or support_status'),
             action='append'
         )
+        parser.add_argument(
+            '--long',
+            default=False,
+            action='store_true',
+            help=_('Show resource types with corresponding description of '
+                   'each resource type.')
+        )
         return parser
 
     def take_action(self, parsed_args):
@@ -101,7 +120,13 @@ class ResourceTypeList(lister.Lister):
 
 def _list_resourcetypes(heat_client, parsed_args):
     resource_types = heat_client.resource_types.list(
-        filters=heat_utils.format_parameters(parsed_args.filter))
-    columns = ['Resource Type']
-    rows = sorted([r.resource_type] for r in resource_types)
-    return (columns, rows)
+        filters=heat_utils.format_parameters(parsed_args.filter),
+        with_description=parsed_args.long
+    )
+    if parsed_args.long:
+        columns = ['Resource Type', 'Description']
+        rows = sorted([r.resource_type, r.description] for r in resource_types)
+    else:
+        columns = ['Resource Type']
+        rows = sorted([r.resource_type] for r in resource_types)
+    return columns, rows

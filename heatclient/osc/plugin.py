@@ -13,7 +13,7 @@
 
 import logging
 
-from openstackclient.common import utils
+from osc_lib import utils
 
 LOG = logging.getLogger(__name__)
 
@@ -33,20 +33,25 @@ def make_client(instance):
         API_VERSIONS)
     LOG.debug('Instantiating orchestration client: %s', heat_client)
 
+    # Note: We can change '_interface' and '_region_name' once
+    # the requirements change to python-openstackclient-2.6.1
     endpoint = instance.get_endpoint_for_service_type(
         API_NAME,
         region_name=instance._region_name,
         interface=instance._interface,
     )
 
-    client = heat_client(
-        endpoint=endpoint,
-        session=instance.session,
-        auth_url=instance._auth_url,
-        username=instance._username,
-        password=instance._password,
-        region_name=instance._region_name,
-    )
+    kwargs = {'endpoint': endpoint,
+              'auth_url': instance.auth.auth_url,
+              'region_name': instance._region_name,
+              'username': instance.auth_ref.username}
+
+    if instance.session:
+        kwargs.update(session=instance.session)
+    else:
+        kwargs.update(token=instance.auth_ref.auth_token)
+
+    client = heat_client(**kwargs)
 
     return client
 

@@ -13,13 +13,13 @@
 
 import copy
 import io
+
 import mock
+from osc_lib import exceptions as exc
+from osc_lib import utils
 import six
 import testscenarios
 import yaml
-
-from openstackclient.common import exceptions as exc
-from openstackclient.common import utils
 
 from heatclient.common import template_format
 from heatclient import exc as heat_exc
@@ -56,12 +56,12 @@ class TestStackCreate(TestStack):
     def setUp(self):
         super(TestStackCreate, self).setUp()
         self.cmd = stack.CreateStack(self.app, None)
-        self.stack_client.create = mock.MagicMock(
-            return_value={'stack': {'id': '1234'}})
-        self.stack_client.get = mock.MagicMock(
-            return_value={'stack_status': 'create_complete'})
-        self.stack_client.preview = mock.MagicMock(
-            return_value=stacks.Stack(None, {'stack': {'id', '1234'}}))
+        self.stack_client.create.return_value = {'stack': {'id': '1234'}}
+        self.stack_client.get.return_value = {
+            'stack_status': 'create_complete'}
+        self.stack_client.preview.return_value = stacks.Stack(
+            None, {'stack': {'id', '1234'}})
+        stack._authenticated_fetcher = mock.MagicMock()
 
     def test_stack_create_defaults(self):
         arglist = ['my_stack', '-t', self.template_path]
@@ -175,16 +175,15 @@ class TestStackUpdate(TestStack):
     def setUp(self):
         super(TestStackUpdate, self).setUp()
         self.cmd = stack.UpdateStack(self.app, None)
-        self.stack_client.update = mock.MagicMock(
-            return_value={'stack': {'id': '1234'}})
-        self.stack_client.preview_update = mock.MagicMock(
-            return_value={'resource_changes': {'added': [],
-                                               'deleted': [],
-                                               'replaced': [],
-                                               'unchanged': [],
-                                               'updated': []}})
-        self.stack_client.get = mock.MagicMock(
-            return_value={'stack_status': 'create_complete'})
+        self.stack_client.update.return_value = {'stack': {'id': '1234'}}
+        self.stack_client.preview_update.return_value = {
+            'resource_changes': {'added': [],
+                                 'deleted': [],
+                                 'replaced': [],
+                                 'unchanged': [],
+                                 'updated': []}}
+        self.stack_client.get.return_value = {
+            'stack_status': 'create_complete'}
 
     def test_stack_update_defaults(self):
         arglist = ['my_stack', '-t', self.template_path]
@@ -384,8 +383,8 @@ class TestStackShow(TestStack):
     def setUp(self):
         super(TestStackShow, self).setUp()
         self.cmd = stack.ShowStack(self.app, None)
-        self.stack_client.get = mock.Mock(
-            return_value=stacks.Stack(None, self.get_response))
+        self.stack_client.get.return_value = stacks.Stack(
+            None, self.get_response)
 
     def test_stack_show(self):
         arglist = ['--format', self.format, 'my_stack']
@@ -428,14 +427,14 @@ class TestStackList(TestStack):
         'stack_name': 'my_stack',
         'stack_status': 'CREATE_COMPLETE',
         'creation_time': '2015-10-21T07:28:00Z',
-        'update_time': '2015-10-21T07:30:00Z'
+        'update_time': '2015-10-21T07:30:00Z',
+        'deletion_time': '2015-10-21T07:50:00Z',
     }
 
     def setUp(self):
         super(TestStackList, self).setUp()
         self.cmd = stack.ListStack(self.app, None)
-        self.stack_client.list = mock.MagicMock(
-            return_value=[stacks.Stack(None, self.data)])
+        self.stack_client.list.return_value = [stacks.Stack(None, self.data)]
         utils.get_dict_properties = mock.MagicMock(return_value='')
 
     def test_stack_list_defaults(self):
@@ -453,6 +452,19 @@ class TestStackList(TestStack):
         cols = copy.deepcopy(self.columns)
         cols.append('Parent')
         arglist = ['--nested']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+
+        columns, data = self.cmd.take_action(parsed_args)
+
+        self.stack_client.list.assert_called_with(**kwargs)
+        self.assertEqual(cols, columns)
+
+    def test_stack_list_deleted(self):
+        kwargs = copy.deepcopy(self.defaults)
+        kwargs['show_deleted'] = True
+        cols = copy.deepcopy(self.columns)
+        cols.append('Deletion Time')
+        arglist = ['--deleted']
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         columns, data = self.cmd.take_action(parsed_args)
@@ -546,9 +558,7 @@ class TestStackDelete(TestStack):
     def setUp(self):
         super(TestStackDelete, self).setUp()
         self.cmd = stack.DeleteStack(self.app, None)
-        self.stack_client.delete = mock.MagicMock()
-        self.stack_client.get = mock.MagicMock(
-            side_effect=heat_exc.HTTPNotFound)
+        self.stack_client.get.side_effect = heat_exc.HTTPNotFound
 
     def test_stack_delete(self):
         arglist = ['stack1', 'stack2', 'stack3']
@@ -661,8 +671,7 @@ class TestStackAdopt(TestStack):
     def setUp(self):
         super(TestStackAdopt, self).setUp()
         self.cmd = stack.AdoptStack(self.app, None)
-        self.stack_client.create = mock.MagicMock(
-            return_value={'stack': {'id': '1234'}})
+        self.stack_client.create.return_value = {'stack': {'id': '1234'}}
 
     def test_stack_adopt_defaults(self):
         arglist = ['my_stack', '--adopt-file', self.adopt_file]
@@ -691,8 +700,8 @@ class TestStackAdopt(TestStack):
                               'Stack my_stack ADOPT_COMPLETE'))
     def test_stack_adopt_wait(self, mock_poll):
         arglist = ['my_stack', '--adopt-file', self.adopt_file, '--wait']
-        self.stack_client.get = mock.MagicMock(return_value=(
-            stacks.Stack(None, {'stack_status': 'ADOPT_COMPLETE'})))
+        self.stack_client.get.return_value = \
+            stacks.Stack(None, {'stack_status': 'ADOPT_COMPLETE'})
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         self.cmd.take_action(parsed_args)
@@ -705,8 +714,8 @@ class TestStackAdopt(TestStack):
                               'Stack my_stack ADOPT_FAILED'))
     def test_stack_adopt_wait_fail(self, mock_poll):
         arglist = ['my_stack', '--adopt-file', self.adopt_file, '--wait']
-        self.stack_client.get = mock.MagicMock(return_value=(
-            stacks.Stack(None, {'stack_status': 'ADOPT_FAILED'})))
+        self.stack_client.get.return_value = \
+            stacks.Stack(None, {'stack_status': 'ADOPT_FAILED'})
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
@@ -722,7 +731,7 @@ class TestStackAbandon(TestStack):
     def setUp(self):
         super(TestStackAbandon, self).setUp()
         self.cmd = stack.AbandonStack(self.app, None)
-        self.stack_client.abandon = mock.MagicMock(return_value=self.response)
+        self.stack_client.abandon.return_value = self.response
 
     def test_stack_abandon(self):
         arglist = ['my_stack']
@@ -779,8 +788,7 @@ class TestStackOutputShow(TestStack):
     def setUp(self):
         super(TestStackOutputShow, self).setUp()
         self.cmd = stack.OutputShowStack(self.app, None)
-        self.stack_client.get = mock.MagicMock(
-            return_value=stacks.Stack(None, self.response))
+        self.stack_client.get.return_value = stacks.Stack(None, self.response)
 
     def test_stack_output_show_no_output(self):
         arglist = ['my_stack']
@@ -811,8 +819,8 @@ class TestStackOutputShow(TestStack):
 
     def test_stack_output_show_output(self):
         arglist = ['my_stack', 'output1']
-        self.stack_client.output_show = mock.MagicMock(
-            return_value={'output': self.outputs[0]})
+        self.stack_client.output_show.return_value = {
+            'output': self.outputs[0]}
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         columns, outputs = self.cmd.take_action(parsed_args)
@@ -832,8 +840,8 @@ class TestStackOutputShow(TestStack):
 
     def test_stack_output_show_output_error(self):
         arglist = ['my_stack', 'output2']
-        self.stack_client.output_show = mock.MagicMock(
-            return_value={'output': self.outputs[1]})
+        self.stack_client.output_show.return_value = {
+            'output': self.outputs[1]}
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         error = self.assertRaises(exc.CommandError,
@@ -922,9 +930,9 @@ class TestStackTemplateShow(TestStack):
 
     def test_stack_template_show_full_template(self):
         arglist = ['my_stack']
-        self.stack_client.template = mock.MagicMock(
-            return_value=yaml.load(inline_templates.FULL_TEMPLATE,
-                                   Loader=template_format.yaml_loader))
+        self.stack_client.template.return_value = yaml.load(
+            inline_templates.FULL_TEMPLATE,
+            Loader=template_format.yaml_loader)
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         columns, outputs = self.cmd.take_action(parsed_args)
@@ -934,9 +942,9 @@ class TestStackTemplateShow(TestStack):
 
     def test_stack_template_show_short_template(self):
         arglist = ['my_stack']
-        self.stack_client.template = mock.MagicMock(
-            return_value=yaml.load(inline_templates.SHORT_TEMPLATE,
-                                   Loader=template_format.yaml_loader))
+        self.stack_client.template.return_value = yaml.load(
+            inline_templates.SHORT_TEMPLATE,
+            Loader=template_format.yaml_loader)
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         columns, outputs = self.cmd.take_action(parsed_args)
@@ -946,8 +954,7 @@ class TestStackTemplateShow(TestStack):
 
     def test_stack_template_show_not_found(self):
         arglist = ['my_stack']
-        self.stack_client.template = mock.MagicMock(
-            side_effect=heat_exc.HTTPNotFound)
+        self.stack_client.template.side_effect = heat_exc.HTTPNotFound
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
@@ -969,9 +976,8 @@ class _TestStackCheckBase(object):
     def _setUp(self, cmd, action, action_name=None):
         self.cmd = cmd
         self.action = action
-        self.mock_client.stacks.get = mock.Mock(
-            return_value=self.stack)
         self.action_name = action_name
+        self.mock_client.stacks.get.return_value = self.stack
 
     def _test_stack_action(self, get_call_count=1):
         arglist = ['my_stack']
@@ -1041,7 +1047,6 @@ class TestStackSuspend(_TestStackCheckBase, TestStack):
 
     def setUp(self):
         super(TestStackSuspend, self).setUp()
-        self.mock_client.actions.suspend = mock.Mock()
         self._setUp(
             stack.SuspendStack(self.app, None),
             self.mock_client.actions.suspend,
@@ -1068,7 +1073,6 @@ class TestStackResume(_TestStackCheckBase, TestStack):
 
     def setUp(self):
         super(TestStackResume, self).setUp()
-        self.mock_client.actions.resume = mock.Mock()
         self._setUp(
             stack.ResumeStack(self.app, None),
             self.mock_client.actions.resume,
@@ -1103,14 +1107,13 @@ class TestStackCancel(_TestStackCheckBase, TestStack):
 
     def setUp(self):
         super(TestStackCancel, self).setUp()
-        self.mock_client.actions.cancel_update = mock.Mock()
         self._setUp(
             stack.CancelStack(self.app, None),
             self.mock_client.actions.cancel_update,
             'ROLLBACK'
         )
-        self.mock_client.stacks.get = mock.Mock(
-            return_value=self.stack_update_in_progress)
+        self.mock_client.stacks.get.return_value = \
+            self.stack_update_in_progress
 
     def test_stack_cancel(self):
         self._test_stack_action(2)
@@ -1128,8 +1131,7 @@ class TestStackCancel(_TestStackCheckBase, TestStack):
         self._test_stack_action_exception()
 
     def test_stack_cancel_unsupported_state(self):
-        self.mock_client.stacks.get = mock.Mock(
-            return_value=self.stack)
+        self.mock_client.stacks.get.return_value = self.stack
         error = self.assertRaises(exc.CommandError,
                                   self._test_stack_action,
                                   2)
@@ -1142,7 +1144,6 @@ class TestStackCheck(_TestStackCheckBase, TestStack):
 
     def setUp(self):
         super(TestStackCheck, self).setUp()
-        self.mock_client.actions.check = mock.Mock()
         self._setUp(
             stack.CheckStack(self.app, None),
             self.mock_client.actions.check,
@@ -1219,12 +1220,9 @@ class TestStackHookPoll(TestStack):
     def setUp(self):
         super(TestStackHookPoll, self).setUp()
         self.cmd = stack.StackHookPoll(self.app, None)
-        self.mock_client.stacks.get = mock.Mock(
-            return_value=self.stack)
-        self.mock_client.events.list = mock.Mock(
-            return_value=[self.event0, self.event1])
-        self.mock_client.resources.list = mock.Mock(
-            return_value=[self.resource])
+        self.mock_client.stacks.get.return_value = self.stack
+        self.mock_client.events.list.return_value = [self.event0, self.event1]
+        self.mock_client.resources.list.return_value = [self.resource]
 
     def test_hook_poll(self):
         expected_columns = ['Resource Name'] + self.columns
@@ -1267,11 +1265,8 @@ class TestStackHookClear(TestStack):
     def setUp(self):
         super(TestStackHookClear, self).setUp()
         self.cmd = stack.StackHookClear(self.app, None)
-        self.mock_client.stacks.get = mock.Mock(
-            return_value=self.stack)
-        self.mock_client.resources.signal = mock.Mock()
-        self.mock_client.resources.list = mock.Mock(
-            return_value=[self.resource])
+        self.mock_client.stacks.get.return_value = self.stack
+        self.mock_client.resources.list.return_value = [self.resource]
 
     def test_hook_clear(self):
         arglist = ['my_stack', 'resource']
@@ -1299,3 +1294,81 @@ class TestStackHookClear(TestStack):
             data={'unset_hook': 'pre-update'},
             resource_name='resource',
             stack_id='my_stack')
+
+    def test_hook_clear_pre_delete(self):
+        arglist = ['my_stack', 'resource', '--pre-delete']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.cmd.take_action(parsed_args)
+        self.mock_client.resources.signal.assert_called_once_with(
+            data={'unset_hook': 'pre-delete'},
+            resource_name='resource',
+            stack_id='my_stack')
+
+
+class TestEnvironmentStackShow(TestStack):
+
+    SAMPLE_ENV = {
+        'parameters': {'p1': 'v1'},
+        'resource_registry': {'resources': {'r1': 't1'}},
+        'parameter_defaults': {'p1': 'v_default'}
+    }
+
+    def setUp(self):
+        super(TestEnvironmentStackShow, self).setUp()
+        self.cmd = stack.EnvironmentShowStack(self.app, None)
+
+    def test_stack_environment_show(self):
+        # Test
+        columns, outputs = self._test_stack_environment_show(self.SAMPLE_ENV)
+
+        # Verify
+        self.assertEqual([{'p1': 'v1'}, {'resources': {'r1': 't1'}},
+                          {'p1': 'v_default'}], outputs)
+
+    def test_stack_environment_show_no_parameters(self):
+        # Setup
+        sample_env = copy.deepcopy(self.SAMPLE_ENV)
+        sample_env['parameters'] = {}
+
+        # Test
+        columns, outputs = self._test_stack_environment_show(sample_env)
+
+        # Verify
+        self.assertEqual([{}, {'resources': {'r1': 't1'}},
+                          {'p1': 'v_default'}], outputs)
+
+    def test_stack_environment_show_no_registry(self):
+        # Setup
+        sample_env = copy.deepcopy(self.SAMPLE_ENV)
+        sample_env['resource_registry'] = {'resources': {}}
+
+        # Test
+        columns, outputs = self._test_stack_environment_show(sample_env)
+
+        # Verify
+        self.assertEqual([{'p1': 'v1'}, {'resources': {}},
+                          {'p1': 'v_default'}], outputs)
+
+    def test_stack_environment_show_no_param_defaults(self):
+        # Setup
+        sample_env = copy.deepcopy(self.SAMPLE_ENV)
+        sample_env['parameter_defaults'] = {}
+
+        # Test
+        columns, outputs = self._test_stack_environment_show(sample_env)
+
+        # Verify
+        self.assertEqual([{'p1': 'v1'}, {'resources': {'r1': 't1'}}, {}],
+                         outputs)
+
+    def _test_stack_environment_show(self, env):
+        self.stack_client.environment = mock.MagicMock(
+            return_value=env
+        )
+
+        parsed_args = self.check_parser(self.cmd, ['test-stack'], [])
+        columns, outputs = self.cmd.take_action(parsed_args)
+        self.assertEqual(['parameters', 'resource_registry',
+                          'parameter_defaults'], columns)
+
+        return columns, outputs

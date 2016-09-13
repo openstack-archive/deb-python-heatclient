@@ -12,11 +12,13 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from heatclient.common import utils
 
 import six
 from six.moves.urllib import parse
 
+from heatclient.common import utils
+from heatclient import exc
+from heatclient.openstack.common._i18n import _
 from heatclient.openstack.common.apiclient import base
 
 
@@ -59,6 +61,12 @@ class Stack(base.Resource):
 
     def output_show(self, output_key):
         return self.manager.output_show(self.identifier, output_key)
+
+    def environment(self):
+        return self.manager.environment(self.identifier)
+
+    def files(self):
+        return self.manager.files(self.identifier)
 
     def get(self):
         # set_loaded() first ... so if we have to bail, we know we tried.
@@ -103,8 +111,10 @@ class StackChildManager(base.BaseManager):
         # redirected stacks:show, so pass redirect=False
         resp = self.client.get('/stacks/%s' % stack_id, redirect=False)
         location = resp.headers.get('location')
-        path = self.client.strip_endpoint(location)
-        return path[len('/stacks/'):]
+        if not location:
+            message = _("Location not returned with redirect")
+            raise exc.InvalidEndpoint(message=message)
+        return location.split('/stacks/', 1)[1]
 
 
 class StackManager(StackChildManager):
@@ -271,6 +281,26 @@ class StackManager(StackChildManager):
         :param stack_id: Stack ID to get the template for
         """
         resp = self.client.get('/stacks/%s/template' % stack_id)
+        body = utils.get_response_body(resp)
+        return body
+
+    def environment(self, stack_id):
+        """Returns the environment for an existing stack.
+
+        :param stack_id: identifies the stack
+        :return:
+        """
+        resp = self.client.get('/stacks/%s/environment' % stack_id)
+        body = utils.get_response_body(resp)
+        return body
+
+    def files(self, stack_id):
+        """Returns the files for an existing stack.
+
+        :param stack_id: identifies the stack
+        :return:
+        """
+        resp = self.client.get('/stacks/%s/files' % stack_id)
         body = utils.get_response_body(resp)
         return body
 

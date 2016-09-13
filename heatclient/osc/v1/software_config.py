@@ -14,15 +14,13 @@
 """Orchestration v1 software config action implementations"""
 
 import logging
-import six
 
+from osc_lib.command import command
+from osc_lib import exceptions as exc
+from osc_lib import utils
+import six
 from six.moves.urllib import request
 import yaml
-
-from cliff import command
-from cliff import lister
-from openstackclient.common import exceptions as exc
-from openstackclient.common import utils
 
 from heatclient.common import format_utils
 from heatclient.common import template_format
@@ -73,7 +71,7 @@ def _delete_config(heat_client, args):
                                 'total': len(args.config)})
 
 
-class ListConfig(lister.Lister):
+class ListConfig(command.Lister):
     """List software configs"""
 
     log = logging.getLogger(__name__ + ".ListConfig")

@@ -13,11 +13,10 @@
 #   Copyright 2015 IBM Corp.
 
 import logging
+
+from osc_lib.command import command
+from osc_lib import utils
 import six
-
-
-from cliff import lister
-from openstackclient.common import utils
 
 from heatclient.common import format_utils
 from heatclient.common import http
@@ -27,7 +26,7 @@ from heatclient import exc
 from heatclient.openstack.common._i18n import _
 
 
-class VersionList(lister.Lister):
+class VersionList(command.Lister):
     """List the available template versions."""
 
     log = logging.getLogger(__name__ + '.VersionList')
@@ -46,7 +45,7 @@ class VersionList(lister.Lister):
         )
 
 
-class FunctionList(lister.Lister):
+class FunctionList(command.Lister):
     """List the available functions."""
 
     log = logging.getLogger(__name__ + '.FunctionList')
@@ -88,12 +87,6 @@ class Validate(format_utils.YamlFormat):
     def get_parser(self, prog_name):
         parser = super(Validate, self).get_parser(prog_name)
         parser.add_argument(
-            '-t', '--template',
-            metavar='<template>',
-            required=True,
-            help=_('Path to the template')
-        )
-        parser.add_argument(
             '-e', '--environment',
             metavar='<environment>',
             action='append',
@@ -115,6 +108,12 @@ class Validate(format_utils.YamlFormat):
             '--ignore-errors',
             metavar='<error1,error2,...>',
             help=_('List of heat errors to ignore')
+        )
+        parser.add_argument(
+            '-t', '--template',
+            metavar='<template>',
+            required=True,
+            help=_('Path to the template')
         )
         return parser
 

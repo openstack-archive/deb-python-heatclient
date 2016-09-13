@@ -16,12 +16,10 @@
 import logging
 import sys
 
-from cliff import command
-from cliff import lister
-from cliff import show
-from openstackclient.common import exceptions as exc
-from openstackclient.common import parseractions
-from openstackclient.common import utils
+from osc_lib.cli import parseractions
+from osc_lib.command import command
+from osc_lib import exceptions as exc
+from osc_lib import utils
 from oslo_serialization import jsonutils
 import six
 from six.moves.urllib import request
@@ -37,19 +35,13 @@ from heatclient.openstack.common._i18n import _
 from heatclient.openstack.common._i18n import _LI
 
 
-class CreateStack(show.ShowOne):
+class CreateStack(command.ShowOne):
     """Create a stack."""
 
     log = logging.getLogger(__name__ + '.CreateStack')
 
     def get_parser(self, prog_name):
         parser = super(CreateStack, self).get_parser(prog_name)
-        parser.add_argument(
-            '-t', '--template',
-            metavar='<template>',
-            required=True,
-            help=_('Path to the template')
-        )
         parser.add_argument(
             '-e', '--environment',
             metavar='<environment>',
@@ -114,6 +106,12 @@ class CreateStack(show.ShowOne):
             'name',
             metavar='<stack-name>',
             help=_('Name of the stack to create')
+        )
+        parser.add_argument(
+            '-t', '--template',
+            metavar='<template>',
+            required=True,
+            help=_('Path to the template')
         )
 
         return parser
@@ -188,7 +186,7 @@ class CreateStack(show.ShowOne):
         return _show_stack(client, stack['id'], format='table', short=True)
 
 
-class UpdateStack(show.ShowOne):
+class UpdateStack(command.ShowOne):
     """Update a stack."""
 
     log = logging.getLogger(__name__ + '.UpdateStack')
@@ -342,8 +340,8 @@ class UpdateStack(show.ShowOne):
             # find the last event to use as the marker
             events = event_utils.get_events(client,
                                             stack_id=parsed_args.stack,
-                                            event_args={'sort_dir': 'desc',
-                                                        'limit': 1})
+                                            event_args={'sort_dir': 'desc'},
+                                            limit=1)
             marker = events[0].id if events else None
 
         client.stacks.update(**fields)
@@ -359,7 +357,7 @@ class UpdateStack(show.ShowOne):
                            short=True)
 
 
-class ShowStack(show.ShowOne):
+class ShowStack(command.ShowOne):
     """Show stack details."""
 
     log = logging.getLogger(__name__ + ".ShowStack")
@@ -427,7 +425,7 @@ def _show_stack(heat_client, stack_id, format='', short=False):
                                                   formatters=formatters)
 
 
-class ListStack(lister.Lister):
+class ListStack(command.Lister):
     """List stacks."""
 
     log = logging.getLogger(__name__ + '.ListStack')
@@ -512,6 +510,67 @@ class ListStack(lister.Lister):
         return _list(client, args=parsed_args)
 
 
+class EnvironmentShowStack(format_utils.YamlFormat):
+    """Show a stack's environment."""
+
+    log = logging.getLogger(__name__)
+
+    def get_parser(self, prog_name):
+        parser = super(EnvironmentShowStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<NAME or ID>',
+            help=_('Name or ID of stack to query')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        try:
+            env = client.stacks.environment(stack_id=parsed_args.stack)
+        except heat_exc.HTTPNotFound:
+            msg = _('Stack not found: %s') % parsed_args.stack
+            raise exc.CommandError(msg)
+
+        fields = ['parameters', 'resource_registry', 'parameter_defaults']
+
+        columns = [f for f in fields if f in env]
+        data = [env[c] for c in columns]
+
+        return columns, data
+
+
+class ListFileStack(format_utils.YamlFormat):
+    """Show a stack's files map."""
+
+    log = logging.getLogger(__name__)
+
+    def get_parser(self, prog_name):
+        parser = super(ListFileStack, self).get_parser(prog_name)
+        parser.add_argument(
+            'stack',
+            metavar='<NAME or ID>',
+            help=_('Name or ID of stack to query')
+        )
+        return parser
+
+    def take_action(self, parsed_args):
+        self.log.debug('take_action(%s)', parsed_args)
+
+        client = self.app.client_manager.orchestration
+
+        try:
+            files = client.stacks.files(stack_id=parsed_args.stack)
+        except heat_exc.HTTPNotFound:
+            msg = _('Stack not found: %s') % parsed_args.stack
+            raise exc.CommandError(msg)
+
+        return ['files'], [files]
+
+
 def _list(client, args=None):
     kwargs = {}
     columns = [
@@ -559,6 +618,9 @@ def _list(client, args=None):
         if args.nested:
             columns.append('Parent')
             kwargs['show_nested'] = True
+
+        if args.deleted:
+            columns.append('Deletion Time')
 
     data = client.stacks.list(**kwargs)
     data = utils.sort_items(data, args.sort if args else None)
@@ -627,8 +689,8 @@ class DeleteStack(command.Command):
                     events = event_utils.get_events(heat_client,
                                                     stack_id=sid,
                                                     event_args={
-                                                        'sort_dir': 'desc',
-                                                        'limit': 1})
+                                                        'sort_dir': 'desc'},
+                                                    limit=1)
                     if events:
                         marker = events[0].id
                 except heat_exc.CommandError as ex:
@@ -663,7 +725,7 @@ class DeleteStack(command.Command):
             raise exc.CommandError(msg)
 
 
-class AdoptStack(show.ShowOne):
+class AdoptStack(command.ShowOne):
     """Adopt a stack."""
 
     log = logging.getLogger(__name__ + '.AdoptStack')
@@ -688,12 +750,6 @@ class AdoptStack(show.ShowOne):
             help=_('Stack creation timeout in minutes')
         )
         parser.add_argument(
-            '--adopt-file',
-            metavar='<adopt-file>',
-            required=True,
-            help=_('Path to adopt stack data file')
-        )
-        parser.add_argument(
             '--enable-rollback',
             action='store_true',
             help=_('Enable rollback on create/update failure')
@@ -709,6 +765,12 @@ class AdoptStack(show.ShowOne):
             '--wait',
             action='store_true',
             help=_('Wait until stack adopt completes')
+        )
+        parser.add_argument(
+            '--adopt-file',
+            metavar='<adopt-file>',
+            required=True,
+            help=_('Path to adopt stack data file')
         )
         return parser
 
@@ -790,7 +852,7 @@ class AbandonStack(format_utils.JsonFormat):
         return columns, data
 
 
-class OutputShowStack(show.ShowOne):
+class OutputShowStack(command.ShowOne):
     """Show stack output."""
 
     log = logging.getLogger(__name__ + '.OutputShowStack')
@@ -875,7 +937,7 @@ class OutputShowStack(show.ShowOne):
         return self.dict2columns(output)
 
 
-class OutputListStack(lister.Lister):
+class OutputListStack(command.Lister):
     """List stack outputs."""
 
     log = logging.getLogger(__name__ + '.OutputListStack')
@@ -940,7 +1002,7 @@ class TemplateShowStack(format_utils.YamlFormat):
         return self.dict2columns(template)
 
 
-class StackActionBase(lister.Lister):
+class StackActionBase(command.Lister):
     """Stack actions base."""
 
     log = logging.getLogger(__name__ + '.StackActionBase')
@@ -992,8 +1054,8 @@ def _stack_action(stack, parsed_args, heat_client, action, action_name=None):
         # find the last event to use as the marker
         events = event_utils.get_events(heat_client,
                                         stack_id=stack,
-                                        event_args={'sort_dir': 'desc',
-                                                    'limit': 1})
+                                        event_args={'sort_dir': 'desc'},
+                                        limit=1)
         marker = events[0].id if events else None
 
     try:
@@ -1128,7 +1190,7 @@ class CancelStack(StackActionBase):
         return (columns, rows)
 
 
-class StackHookPoll(lister.Lister):
+class StackHookPoll(command.Lister):
     '''List resources with pending hook for a stack.'''
 
     log = logging.getLogger(__name__ + '.StackHookPoll')
@@ -1220,6 +1282,11 @@ class StackHookClear(command.Command):
             help=_('Clear the pre-update hooks')
         )
         parser.add_argument(
+            '--pre-delete',
+            action='store_true',
+            help=_('Clear the pre-delete hooks')
+        )
+        parser.add_argument(
             'hook',
             metavar='<resource>',
             nargs='+',
@@ -1246,6 +1313,8 @@ def _hook_clear(args, heat_client):
         hook_type = 'pre-create'
     elif args.pre_update:
         hook_type = 'pre-update'
+    elif args.pre_delete:
+        hook_type = 'pre-delete'
     else:
         hook_type = hook_utils.get_hook_type_via_status(heat_client,
                                                         args.stack)

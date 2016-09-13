@@ -14,9 +14,8 @@
 import mock
 import testtools
 
-import heatclient.v1.shell as shell
-
 from heatclient.common import hook_utils
+import heatclient.v1.shell as shell
 
 
 class TestHooks(testtools.TestCase):
@@ -266,6 +265,21 @@ class TestHooks(testtools.TestCase):
         self.assertEqual(1, self.client.resources.signal.call_count)
         payload = self.client.resources.signal.call_args_list[0][1]
         self.assertEqual({'unset_hook': 'pre-update'}, payload['data'])
+        self.assertEqual('bp', payload['resource_name'])
+        self.assertEqual('mystack', payload['stack_id'])
+
+    def test_clear_pre_delete_hooks(self):
+        type(self.args).hook = mock.PropertyMock(
+            return_value=['bp'])
+        type(self.args).pre_delete = mock.PropertyMock(return_value=True)
+        bp = mock.Mock()
+        type(bp).resource_name = 'bp'
+        self.client.resources.list = mock.Mock(return_value=[bp])
+
+        shell.do_hook_clear(self.client, self.args)
+        self.assertEqual(1, self.client.resources.signal.call_count)
+        payload = self.client.resources.signal.call_args_list[0][1]
+        self.assertEqual({'unset_hook': 'pre-delete'}, payload['data'])
         self.assertEqual('bp', payload['resource_name'])
         self.assertEqual('mystack', payload['stack_id'])
 

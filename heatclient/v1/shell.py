@@ -14,12 +14,12 @@
 #    under the License.
 
 import logging
+import sys
 
 from oslo_serialization import jsonutils
 from oslo_utils import strutils
 import six
 from six.moves.urllib import request
-import sys
 import yaml
 
 from heatclient.common import deployment_utils
@@ -29,12 +29,10 @@ from heatclient.common import http
 from heatclient.common import template_format
 from heatclient.common import template_utils
 from heatclient.common import utils
-
+import heatclient.exc as exc
 from heatclient.openstack.common._i18n import _
 from heatclient.openstack.common._i18n import _LI
 from heatclient.openstack.common._i18n import _LW
-
-import heatclient.exc as exc
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +248,7 @@ def do_stack_adopt(hc, args):
            help=_('A list of tags to associate with the stack.'))
 def do_stack_preview(hc, args):
     '''Preview the stack.'''
-    show_deprecated('heat stack-preview', 'openstack stack update --dry-run')
+    show_deprecated('heat stack-preview', 'openstack stack create --dry-run')
 
     tpl_files, template = template_utils.get_template_contents(
         args.template_file,
@@ -686,9 +684,12 @@ def do_stack_list(hc, args=None):
             kwargs['sort_dir'] = args.sort_dir
 
         if args.global_tenant or args.show_owner:
-            fields.insert(2, 'stack_owner')
+            fields.append('stack_owner')
         if args.global_tenant:
-            fields.insert(2, 'project')
+            fields.append('project')
+
+        if args.show_deleted:
+            fields.append('deletion_time')
 
     stacks = hc.stacks.list(**kwargs)
     utils.print_list(stacks, fields, sortby_index=sortby_index)
@@ -938,7 +939,7 @@ def do_template_validate(hc, args):
 @utils.arg('-f', '--filter', metavar='<KEY=VALUE>',
            help=_('Filter parameters to apply on returned resources based on'
                   ' their name, status, type, action, id and'
-                  ' physcial_resource_id. This can be specified multiple'
+                  ' physical_resource_id. This can be specified multiple'
                   ' times.'),
            action='append')
 def do_resource_list(hc, args):
@@ -1104,6 +1105,8 @@ def do_resource_mark_unhealthy(hc, args):
            help=_('Clear the pre-create hooks (optional)'))
 @utils.arg('--pre-update', action='store_true', default=False,
            help=_('Clear the pre-update hooks (optional)'))
+@utils.arg('--pre-delete', action='store_true', default=False,
+           help=_('Clear the pre-delete hooks (optional)'))
 @utils.arg('hook', metavar='<RESOURCE>', nargs='+',
            help=_('Resource names with hooks to clear. Resources '
                   'in nested stacks can be set using slash as a separator: '
@@ -1118,6 +1121,8 @@ def do_hook_clear(hc, args):
         hook_type = 'pre-create'
     elif args.pre_update:
         hook_type = 'pre-update'
+    elif args.pre_delete:
+        hook_type = 'pre-delete'
     else:
         hook_type = hook_utils.get_hook_type_via_status(hc, args.id)
 

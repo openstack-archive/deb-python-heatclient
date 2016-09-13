@@ -12,7 +12,7 @@
 
 import yaml
 
-from tempest_lib import exceptions
+from tempest.lib import exceptions
 
 from heatclient.tests.functional.osc.v1 import base
 
@@ -107,6 +107,26 @@ class SimpleReadOnlyOpenStackClientTest(base.OpenStackClientTestBase):
 
     def test_heat_template_validate_hot(self):
         self._template_validate(
+            'heat_minimal_hot.yaml',
+            ['test_client_name=test_client_name', 'test_wait_secs=123']
+        )
+
+    def _orchestration_template_validate(self, templ_name, parms):
+        template_path = self.get_template_path(templ_name)
+        cmd = 'orchestration template validate --template %s' % template_path
+        for parm in parms:
+            cmd += ' --parameter ' + parm
+        ret = self.openstack(cmd)
+        self.assertRegex(ret, r'Value:.*123')
+
+    def test_orchestration_template_validate_yaml(self):
+        self._orchestration_template_validate(
+            'heat_minimal.yaml',
+            ['ClientName=ClientName', 'WaitSecs=123']
+        )
+
+    def test_orchestration_template_validate_hot(self):
+        self._orchestration_template_validate(
             'heat_minimal_hot.yaml',
             ['test_client_name=test_client_name', 'test_wait_secs=123']
         )

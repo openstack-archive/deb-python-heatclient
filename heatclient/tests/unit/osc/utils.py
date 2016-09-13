@@ -17,6 +17,7 @@
 import os
 
 import fixtures
+import mock
 import sys
 import testtools
 
@@ -55,19 +56,6 @@ class TestCase(testtools.TestCase):
                 standardMsg = '%s is not an instance of %r' % (obj, cls)
                 self.fail(self._formatMessage(msg, standardMsg))
 
-        def assertDictEqual(self, d1, d2, msg=None):
-            # Simple version taken from 2.7
-            self.assertIsInstance(d1, dict,
-                                  'First argument is not a dictionary')
-            self.assertIsInstance(d2, dict,
-                                  'Second argument is not a dictionary')
-            if d1 != d2:
-                if msg:
-                    self.fail(msg)
-                else:
-                    standardMsg = '%r != %r' % (d1, d2)
-                    self.fail(standardMsg)
-
 
 class TestCommand(TestCase):
     """Test cliff command classes"""
@@ -76,8 +64,10 @@ class TestCommand(TestCase):
         super(TestCommand, self).setUp()
         # Build up a fake app
         self.fake_stdout = fakes.FakeStdout()
-        self.app = fakes.FakeApp(self.fake_stdout)
-        self.app.client_manager = fakes.FakeClientManager()
+        self.app = mock.MagicMock()
+        self.app.stdout = self.fake_stdout
+        self.app.stdin = sys.stdin
+        self.app.stderr = sys.stderr
 
     def check_parser(self, cmd, args, verify_args):
         cmd_parser = cmd.get_parser('check_parser')

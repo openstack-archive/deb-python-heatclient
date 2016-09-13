@@ -14,20 +14,18 @@
 """Orchestration v1 Stack Snapshot implementations."""
 
 import logging
-import six
 
-from cliff import command
-from cliff import lister
-from cliff import show
-from openstackclient.common import exceptions as exc
-from openstackclient.common import utils
+from osc_lib.command import command
+from osc_lib import exceptions as exc
+from osc_lib.i18n import _
+from osc_lib import utils
+import six
 
 from heatclient.common import format_utils
 from heatclient import exc as heat_exc
-from openstackclient.i18n import _
 
 
-class ListSnapshot(lister.Lister):
+class ListSnapshot(command.Lister):
     """List stack snapshots."""
 
     log = logging.getLogger(__name__ + ".ListSnapshot")
@@ -137,7 +135,7 @@ class RestoreSnapshot(command.Command):
                                     'snapshot': parsed_args.snapshot})
 
 
-class CreateSnapshot(show.ShowOne):
+class CreateSnapshot(command.ShowOne):
     """Create stack snapshot."""
 
     log = logging.getLogger(__name__ + ".CreateSnapshot")

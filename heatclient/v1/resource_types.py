@@ -10,23 +10,31 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from heatclient.common import utils
 
 from oslo_utils import encodeutils
+import six
 from six.moves.urllib import parse
 
+from heatclient.common import utils
 from heatclient.openstack.common.apiclient import base
 
 
 class ResourceType(base.Resource):
     def __repr__(self):
-        return "<ResourceType %s>" % self._info
+        if isinstance(self._info, six.string_types):
+            return "<ResourceType %s>" % self._info
+        else:
+            return "<ResourceType %s>" % self._info.get('resource_type')
 
     def data(self, **kwargs):
         return self.manager.data(self, **kwargs)
 
     def _add_details(self, info):
-        self.resource_type = info
+        if isinstance(info, six.string_types):
+            self.resource_type = info
+        elif isinstance(info, dict):
+            self.resource_type = info.get('resource_type')
+            self.description = info.get('description')
 
 
 class ResourceTypeManager(base.BaseManager):
@@ -44,19 +52,25 @@ class ResourceTypeManager(base.BaseManager):
         if 'filters' in kwargs:
             filters = kwargs.pop('filters')
             params.update(filters)
+        if 'with_description' in kwargs:
+            with_description = kwargs.pop('with_description')
+            params.update({'with_description': with_description})
+        if params:
             url += '?%s' % parse.urlencode(params, True)
 
         return self._list(url, self.KEY)
 
-    def get(self, resource_type):
+    def get(self, resource_type, with_description=False):
         """Get the details for a specific resource_type.
 
         :param resource_type: name of the resource type to get the details for
+        :param with_description: return result with description or not
         """
         url_str = '/%s/%s' % (
                   self.KEY,
                   parse.quote(encodeutils.safe_encode(resource_type), ''))
-        resp = self.client.get(url_str)
+        resp = self.client.get(url_str,
+                               params={'with_description': with_description})
         body = utils.get_response_body(resp)
         return body
 

@@ -11,12 +11,14 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import logging
-import mock
 import os
 import socket
 
-
+from keystoneauth1 import adapter
+import mock
+from mox3 import mox
 from oslo_serialization import jsonutils
 import requests
 import six
@@ -26,8 +28,6 @@ from heatclient.common import http
 from heatclient.common import utils
 from heatclient import exc
 from heatclient.tests.unit import fakes
-from keystoneclient import adapter
-from mox3 import mox
 
 
 class HttpClientTest(testtools.TestCase):
@@ -422,7 +422,7 @@ class HttpClientTest(testtools.TestCase):
                 {'location': 'http://example.com:8004/foo/bar'},
                 ''))
         mock_conn = http.requests.request(
-            'PUT', 'http://EXAMPLE.com:8004/foo/bar',
+            'PUT', 'http://example.com:8004/foo/bar',
             allow_redirects=False,
             headers={'Content-Type': 'application/json',
                      'Accept': 'application/json',
@@ -439,23 +439,6 @@ class HttpClientTest(testtools.TestCase):
         resp, body = client.json_request('PUT', '')
 
         self.assertEqual(200, resp.status_code)
-
-    def test_http_manual_redirect_prohibited(self):
-        mock_conn = http.requests.request(
-            'DELETE', 'http://example.com:8004/foo',
-            allow_redirects=False,
-            headers={'Content-Type': 'application/json',
-                     'Accept': 'application/json',
-                     'User-Agent': 'python-heatclient'})
-        mock_conn.AndReturn(
-            fakes.FakeHTTPResponse(
-                302, 'Found',
-                {'location': 'http://example.com:8004/'},
-                ''))
-        self.m.ReplayAll()
-        client = http.HTTPClient('http://example.com:8004/foo')
-        self.assertRaises(exc.InvalidEndpoint,
-                          client.json_request, 'DELETE', '')
 
     def test_http_manual_redirect_error_without_location(self):
         mock_conn = http.requests.request(
@@ -851,7 +834,31 @@ class SessionClientTest(testtools.TestCase):
         resp = client.request('', 'GET', **kwargs)
 
         self.assertEqual({'endpoint_override': 'http://no.where/',
-                          'json': 'some_data',
+                          'data': '"some_data"',
+                          'user_agent': 'python-heatclient',
+                          'raise_exc': False}, self.request.call_args[1])
+        self.assertEqual(200, resp.status_code)
+
+    @mock.patch.object(jsonutils, 'dumps')
+    def test_kwargs_with_files(self, mock_dumps):
+        fake = fakes.FakeHTTPResponse(
+            200,
+            'OK',
+            {'content-type': 'application/json'},
+            {}
+        )
+        mock_dumps.return_value = "{'files': test}}"
+        data = six.BytesIO(b'test')
+        kwargs = {'endpoint_override': 'http://no.where/',
+                  'data': {'files': data}}
+        client = http.SessionClient(mock.ANY)
+
+        self.request.return_value = (fake, {})
+
+        resp = client.request('', 'GET', **kwargs)
+
+        self.assertEqual({'endpoint_override': 'http://no.where/',
+                          'data': "{'files': test}}",
                           'user_agent': 'python-heatclient',
                           'raise_exc': False}, self.request.call_args[1])
         self.assertEqual(200, resp.status_code)

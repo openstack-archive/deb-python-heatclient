@@ -10,13 +10,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
-import logging
+from tempest.lib.common.utils import data_utils as utils
 
 from heatclient.tests.functional.osc.v1 import base
-from tempest_lib.common.utils import data_utils as utils
-
-LOG = logging.getLogger(__name__)
 
 
 class OpenStackClientStackTest(base.OpenStackClientTestBase):

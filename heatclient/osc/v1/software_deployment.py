@@ -14,14 +14,11 @@
 """Orchestration v1 Software Deployment action implementations"""
 
 import logging
+
+from osc_lib.command import command
+from osc_lib import exceptions as exc
+from osc_lib import utils
 from oslo_serialization import jsonutils
-
-from cliff import command
-from cliff import lister
-from cliff import show
-
-from openstackclient.common import exceptions as exc
-from openstackclient.common import utils
 
 from heatclient.common import deployment_utils
 from heatclient.common import format_utils
@@ -65,12 +62,6 @@ class CreateDeployment(format_utils.YamlFormat):
             help=_('ID of the configuration to deploy')
         )
         parser.add_argument(
-            '--server',
-            metavar='<server>',
-            required=True,
-            help=_('ID of the server being deployed to')
-        )
-        parser.add_argument(
             '--signal-transport',
             metavar='<signal-transport>',
             default='TEMP_URL_SIGNAL',
@@ -95,6 +86,12 @@ class CreateDeployment(format_utils.YamlFormat):
             type=int,
             default=60,
             help=_('Deployment timeout in minutes')
+        )
+        parser.add_argument(
+            '--server',
+            metavar='<server>',
+            required=True,
+            help=_('ID of the server being deployed to')
         )
         return parser
 
@@ -182,7 +179,7 @@ class DeleteDeployment(command.Command):
                                    'total': len(parsed_args.deployment)})
 
 
-class ListDeployment(lister.Lister):
+class ListDeployment(command.Lister):
     """List software deployments."""
 
     log = logging.getLogger(__name__ + '.ListDeployment')
@@ -222,7 +219,7 @@ def _list_deployment(heat_client, args=None):
     )
 
 
-class ShowDeployment(show.ShowOne):
+class ShowDeployment(command.ShowOne):
     """Show SoftwareDeployment Details."""
 
     log = logging.getLogger(__name__ + ".ShowSoftwareDeployment")

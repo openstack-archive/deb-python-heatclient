@@ -15,9 +15,9 @@
 import logging
 import time
 
-from cliff import lister
-from cliff import show
-from openstackclient.common import utils
+from cliff.formatters import base
+from osc_lib.command import command
+from osc_lib import utils
 
 from heatclient.common import event_utils
 from heatclient.common import utils as heat_utils
@@ -25,7 +25,7 @@ from heatclient import exc
 from heatclient.openstack.common._i18n import _
 
 
-class ShowEvent(show.ShowOne):
+class ShowEvent(command.ShowOne):
     """Show event details."""
 
     log = logging.getLogger(__name__ + '.ShowEvent')
@@ -81,14 +81,18 @@ class ShowEvent(show.ShowOne):
                                                   formatters=formatters)
 
 
-class ListEvent(lister.Lister):
+class ListEvent(command.Lister):
     """List events."""
 
     log = logging.getLogger(__name__ + '.ListEvent')
 
     @property
     def formatter_default(self):
-        return 'value'
+        return 'log'
+
+    @property
+    def formatter_namespace(self):
+        return 'heatclient.event.formatter.list'
 
     def get_parser(self, prog_name):
         parser = super(ListEvent, self).get_parser(prog_name)
@@ -152,8 +156,6 @@ class ListEvent(lister.Lister):
 
         kwargs = {
             'resource_name': parsed_args.resource,
-            'limit': parsed_args.limit,
-            'marker': parsed_args.marker,
             'filters': heat_utils.format_parameters(parsed_args.filter),
             'sort_dir': 'asc'
         }
@@ -163,24 +165,19 @@ class ListEvent(lister.Lister):
             raise exc.CommandError(msg)
 
         if parsed_args.nested_depth:
-            # Until the API supports recursive event listing we'll have to do
-            # the marker/limit filtering client-side
-            del kwargs['marker']
-            del kwargs['limit']
             columns.append('stack_name')
             nested_depth = parsed_args.nested_depth
         else:
             nested_depth = 0
 
         if parsed_args.follow:
-            if parsed_args.formatter != 'value':
-                msg = _('--follow can only be specified with --format value')
+            if parsed_args.formatter != 'log':
+                msg = _('--follow can only be specified with --format log')
                 raise exc.CommandError(msg)
 
             marker = parsed_args.marker
             try:
                 while True:
-                    kwargs['marker'] = marker
                     events = event_utils.get_events(
                         client,
                         stack_id=parsed_args.stack,
@@ -205,9 +202,8 @@ class ListEvent(lister.Lister):
         if parsed_args.sort:
             events = utils.sort_items(events, ','.join(parsed_args.sort))
 
-        if parsed_args.formatter == 'value':
-            events = heat_utils.event_log_formatter(events).split('\n')
-            return [], [e.split(' ') for e in events]
+        if parsed_args.formatter == 'log':
+            return [], events
 
         if len(events):
             if hasattr(events[0], 'resource_name'):
@@ -220,3 +216,14 @@ class ListEvent(lister.Lister):
             columns,
             (utils.get_item_properties(s, columns) for s in events)
         )
+
+
+class LogFormatter(base.ListFormatter):
+    """A formatter which prints event objects in a log style"""
+
+    def add_argument_group(self, parser):
+        pass
+
+    def emit_list(self, column_names, data, stdout, parsed_args):
+        stdout.write(heat_utils.event_log_formatter(data))
+        stdout.write('\n')

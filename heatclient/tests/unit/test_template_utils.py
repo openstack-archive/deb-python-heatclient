@@ -13,10 +13,12 @@
 
 import base64
 import json
+import tempfile
+
 from mox3 import mox
 import six
+from six.moves.urllib import error
 from six.moves.urllib import request
-import tempfile
 import testtools
 from testtools import matchers
 import yaml
@@ -409,8 +411,9 @@ class ShellEnvironmentTest(testtools.TestCase):
                          files['file:///home/b/a.yaml'])
 
         self.assertEqual(['file:///home/my/dir/env1.yaml'], env_file_list)
-        self.assertEqual(json.dumps(expected_env),
-                         files['file:///home/my/dir/env1.yaml'])
+        self.assertTrue('file:///home/my/dir/env1.yaml' in files)
+        self.assertEqual(expected_env,
+                         json.loads(files['file:///home/my/dir/env1.yaml']))
 
     def test_process_environment_relative_file_tracker(self):
 
@@ -565,6 +568,17 @@ class TestGetTemplateContents(testtools.TestCase):
             self.assertEqual(
                 'Could not fetch template from file://%s' % tmpl_file.name,
                 str(ex))
+
+    def test_get_template_file_nonextant(self):
+        nonextant_file = '/template/dummy/file/path/and/name.yaml'
+        ex = self.assertRaises(
+            error.URLError,
+            template_utils.get_template_contents,
+            nonextant_file)
+        self.assertEqual(
+            "<urlopen error [Errno 2] No such file or directory: '%s'>"
+            % nonextant_file,
+            str(ex))
 
     def test_get_template_contents_file_none(self):
         ex = self.assertRaises(

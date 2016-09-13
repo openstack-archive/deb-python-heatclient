@@ -19,6 +19,7 @@ import logging
 import os
 import socket
 
+from keystoneauth1 import adapter
 from oslo_serialization import jsonutils
 from oslo_utils import encodeutils
 from oslo_utils import importutils
@@ -30,7 +31,6 @@ from heatclient.common import utils
 from heatclient import exc
 from heatclient.openstack.common._i18n import _
 from heatclient.openstack.common._i18n import _LW
-from keystoneclient import adapter
 
 LOG = logging.getLogger(__name__)
 USER_AGENT = 'python-heatclient'
@@ -201,10 +201,14 @@ class HTTPClient(object):
         # See issue: https://github.com/kennethreitz/requests/issues/1704
         allow_redirects = False
 
+        # Use fully qualified URL from response header for redirects
+        if not parse.urlparse(url).netloc:
+            url = self.endpoint_url + url
+
         try:
             resp = requests.request(
                 method,
-                self.endpoint_url + url,
+                url,
                 allow_redirects=allow_redirects,
                 **kwargs)
         except socket.gaierror as e:
@@ -231,22 +235,14 @@ class HTTPClient(object):
             # unless caller specified redirect=False
             if redirect:
                 location = resp.headers.get('location')
-                path = self.strip_endpoint(location)
-                resp = self._http_request(path, method, **kwargs)
+                if not location:
+                    message = _("Location not returned with redirect")
+                    raise exc.InvalidEndpoint(message=message)
+                resp = self._http_request(location, method, **kwargs)
         elif resp.status_code == 300:
             raise exc.from_response(resp)
 
         return resp
-
-    def strip_endpoint(self, location):
-        if location is None:
-            message = _("Location not returned with 302")
-            raise exc.InvalidEndpoint(message=message)
-        elif location.lower().startswith(self.endpoint.lower()):
-            return location[len(self.endpoint):]
-        else:
-            message = _("Prohibited endpoint redirect %s") % location
-            raise exc.InvalidEndpoint(message=message)
 
     def credentials_headers(self):
         creds = {}
@@ -310,10 +306,8 @@ class SessionClient(adapter.LegacyJsonAdapter):
         redirect = kwargs.get('redirect')
         kwargs.setdefault('user_agent', USER_AGENT)
 
-        try:
-            kwargs.setdefault('json', kwargs.pop('data'))
-        except KeyError:
-            pass
+        if 'data' in kwargs:
+            kwargs['data'] = jsonutils.dumps(kwargs['data'])
 
         resp, body = super(SessionClient, self).request(
             url, method,

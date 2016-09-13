@@ -13,6 +13,7 @@
 #   Copyright 2015 IBM Corp.
 
 import copy
+
 import mock
 import testscenarios
 
@@ -61,10 +62,7 @@ class TestEventShow(TestEvent):
     def test_event_show(self):
         arglist = ['--format', self.format, 'my_stack', 'my_resource', '1234']
         parsed_args = self.check_parser(self.cmd, arglist, [])
-        self.stack_client.get = mock.MagicMock()
-        self.resource_client.get = mock.MagicMock()
-        self.event_client.get = mock.MagicMock(
-            return_value=events.Event(None, self.response))
+        self.event_client.get.return_value = events.Event(None, self.response)
 
         self.cmd.take_action(parsed_args)
 
@@ -83,23 +81,17 @@ class TestEventShow(TestEvent):
 
     def test_event_show_stack_not_found(self):
         error = 'Stack not found'
-        self.stack_client.get = mock.MagicMock(
-            side_effect=exc.HTTPNotFound(error))
+        self.stack_client.get.side_effect = exc.HTTPNotFound(error)
         self._test_not_found(error)
 
     def test_event_show_resource_not_found(self):
         error = 'Resource not found'
-        self.stack_client.get = mock.MagicMock()
-        self.resource_client.get = mock.MagicMock(
-            side_effect=exc.HTTPNotFound(error))
+        self.stack_client.get.side_effect = exc.HTTPNotFound(error)
         self._test_not_found(error)
 
     def test_event_show_event_not_found(self):
         error = 'Event not found'
-        self.stack_client.get = mock.MagicMock()
-        self.resource_client.get = mock.MagicMock()
-        self.event_client.get = mock.MagicMock(
-            side_effect=exc.HTTPNotFound(error))
+        self.stack_client.get.side_effect = exc.HTTPNotFound(error)
         self._test_not_found(error)
 
 
@@ -108,8 +100,6 @@ class TestEventList(TestEvent):
     defaults = {
         'stack_id': 'my_stack',
         'resource_name': None,
-        'limit': None,
-        'marker': None,
         'filters': {},
         'sort_dir': 'asc'
     }
@@ -142,8 +132,8 @@ class TestEventList(TestEvent):
         super(TestEventList, self).setUp()
         self.cmd = event.ListEvent(self.app, None)
         self.event = self.MockEvent()
-        self.event_client.list = mock.MagicMock(return_value=[self.event])
-        self.resource_client.list = mock.MagicMock(return_value={})
+        self.event_client.list.return_value = [self.event]
+        self.resource_client.list.return_value = {}
 
     def test_event_list_defaults(self):
         arglist = ['my_stack', '--format', 'table']
@@ -178,8 +168,7 @@ class TestEventList(TestEvent):
     def test_event_list_nested_depth(self):
         arglist = ['my_stack', '--nested-depth', '3', '--format', 'table']
         kwargs = copy.deepcopy(self.defaults)
-        del kwargs['marker']
-        del kwargs['limit']
+        kwargs['nested_depth'] = 3
         cols = copy.deepcopy(self.fields)
         cols[-1] = 'stack_name'
         cols.append('logical_resource_id')
@@ -187,7 +176,10 @@ class TestEventList(TestEvent):
 
         columns, data = self.cmd.take_action(parsed_args)
 
-        self.event_client.list.assert_called_with(**kwargs)
+        self.event_client.list.assert_has_calls([
+            mock.call(**kwargs),
+            mock.call(**self.defaults)
+        ])
         self.assertEqual(cols, columns)
 
     def test_event_list_sort(self):
@@ -225,14 +217,13 @@ class TestEventList(TestEvent):
         self.assertEqual([], data)
         self.assertEqual(expected, self.fake_stdout.make_string())
 
-    def test_event_list_value_format(self):
+    def test_event_list_log_format(self):
         arglist = ['my_stack']
         expected = ('2015-11-13 10:02:17 [resource1]: CREATE_COMPLETE  '
-                    'state changed')
+                    'state changed\n')
         parsed_args = self.check_parser(self.cmd, arglist, [])
 
-        columns, data = self.cmd.take_action(parsed_args)
+        self.cmd.run(parsed_args)
 
         self.event_client.list.assert_called_with(**self.defaults)
-        self.assertEqual([], columns)
-        self.assertEqual([expected.split(' ')], data)
+        self.assertEqual(expected, self.fake_stdout.make_string())

@@ -11,9 +11,7 @@
 #   under the License.
 #
 
-import mock
-
-from openstackclient.common import exceptions as exc
+from osc_lib import exceptions as exc
 
 from heatclient import exc as heat_exc
 from heatclient.osc.v1 import resource_type
@@ -32,17 +30,15 @@ class TestResourceTypeShow(TestResourceType):
     def setUp(self):
         super(TestResourceTypeShow, self).setUp()
         self.cmd = resource_type.ResourceTypeShow(self.app, None)
-        self.mock_client.resource_types.get = mock.Mock(
-            return_value={})
-        self.mock_client.resource_types.generate_template = mock.Mock(
-            return_value={})
+        self.mock_client.resource_types.get.return_value = {}
+        self.mock_client.resource_types.generate_template.return_value = {}
 
     def test_resourcetype_show(self):
         arglist = ['OS::Heat::None']
         parsed_args = self.check_parser(self.cmd, arglist, [])
         self.cmd.take_action(parsed_args)
         self.mock_client.resource_types.get.assert_called_once_with(
-            'OS::Heat::None')
+            'OS::Heat::None', False)
 
     def test_resourcetype_show_json(self):
         arglist = ['OS::Heat::None',
@@ -50,21 +46,20 @@ class TestResourceTypeShow(TestResourceType):
         parsed_args = self.check_parser(self.cmd, arglist, [])
         self.cmd.take_action(parsed_args)
         self.mock_client.resource_types.get.assert_called_once_with(
-            'OS::Heat::None')
+            'OS::Heat::None', False)
 
     def test_resourcetype_show_error_get(self):
         arglist = ['OS::Heat::None']
         parsed_args = self.check_parser(self.cmd, arglist, [])
-        self.mock_client.resource_types.get = mock.Mock(
-            side_effect=heat_exc.HTTPNotFound)
+        self.mock_client.resource_types.get.side_effect = heat_exc.HTTPNotFound
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
 
     def test_resourcetype_show_error_template(self):
         arglist = ['OS::Heat::None',
                    '--template-type', 'hot']
         parsed_args = self.check_parser(self.cmd, arglist, [])
-        self.mock_client.resource_types.generate_template = mock.Mock(
-            side_effect=heat_exc.HTTPNotFound)
+        self.mock_client.resource_types.generate_template.side_effect = \
+            heat_exc.HTTPNotFound
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
 
     def test_resourcetype_show_template_hot(self):
@@ -101,14 +96,32 @@ class TestResourceTypeShow(TestResourceType):
         parsed_args = self.check_parser(self.cmd, arglist, [])
         self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
 
+    def test_resourcetype_show_with_description(self):
+        arglist = ['OS::Heat::None', '--long']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.cmd.take_action(parsed_args)
+        self.mock_client.resource_types.get.assert_called_with(
+            'OS::Heat::None', True)
+
+    def test_resourcetype_show_long_and_template_type_error(self):
+        arglist = ['OS::Heat::None',
+                   '--template-type', 'cfn',
+                   '--long']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        self.assertRaises(exc.CommandError, self.cmd.take_action, parsed_args)
+
 
 class TestTypeList(TestResourceType):
 
     expected_columns = ['Resource Type']
     list_response = [
-        resource_types.ResourceType(None, 'BBB'),
-        resource_types.ResourceType(None, 'AAA'),
-        resource_types.ResourceType(None, 'CCC')
+        resource_types.ResourceType(None, {'resource_type': 'BBB',
+                                           'description': 'This is BBB'}),
+        resource_types.ResourceType(None, {'resource_type': 'AAA',
+                                           'description': 'Well done'}),
+        resource_types.ResourceType(None,
+                                    {'resource_type': 'CCC',
+                                     'description': 'No description given'})
     ]
     expected_rows = [
         ['AAA'],
@@ -119,8 +132,7 @@ class TestTypeList(TestResourceType):
     def setUp(self):
         super(TestTypeList, self).setUp()
         self.cmd = resource_type.ResourceTypeList(self.app, None)
-        self.mock_client.resource_types.list = mock.Mock(
-            return_value=self.list_response)
+        self.mock_client.resource_types.list.return_value = self.list_response
 
     def test_resourcetype_list(self):
         arglist = []
@@ -128,7 +140,7 @@ class TestTypeList(TestResourceType):
         columns, rows = self.cmd.take_action(parsed_args)
 
         self.mock_client.resource_types.list.assert_called_with(
-            filters={})
+            filters={}, with_description=False)
         self.assertEqual(self.expected_columns, columns)
         self.assertEqual(self.expected_rows, rows)
 
@@ -138,7 +150,7 @@ class TestTypeList(TestResourceType):
         columns, rows = self.cmd.take_action(parsed_args)
 
         self.mock_client.resource_types.list.assert_called_once_with(
-            filters={'name': 'B'})
+            filters={'name': 'B'}, with_description=False)
         self.assertEqual(self.expected_columns, columns)
         self.assertEqual(self.expected_rows, rows)
 
@@ -148,6 +160,19 @@ class TestTypeList(TestResourceType):
         columns, rows = self.cmd.take_action(parsed_args)
 
         self.mock_client.resource_types.list.assert_called_once_with(
-            filters={'name': 'B', 'version': '123'})
+            filters={'name': 'B', 'version': '123'}, with_description=False)
         self.assertEqual(self.expected_columns, columns)
         self.assertEqual(self.expected_rows, rows)
+
+    def test_resourcetype_list_with_description(self):
+        arglist = ['--long']
+        parsed_args = self.check_parser(self.cmd, arglist, [])
+        columns, rows = self.cmd.take_action(parsed_args)
+
+        self.mock_client.resource_types.list.assert_called_once_with(
+            filters={}, with_description=True)
+        self.assertEqual(['Resource Type', 'Description'], columns)
+        self.assertEqual([['AAA', 'Well done'],
+                          ['BBB', 'This is BBB'],
+                          ['CCC', 'No description given']],
+                         rows)

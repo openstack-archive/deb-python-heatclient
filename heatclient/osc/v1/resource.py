@@ -13,24 +13,22 @@
 
 """Orchestration v1 Stack action implementations"""
 
-from cliff import command
 import logging
+
+from osc_lib.command import command
+from osc_lib import exceptions as exc
+from osc_lib.i18n import _
+from osc_lib import utils
+from oslo_serialization import jsonutils
 import six
 from six.moves.urllib import request
-
-from cliff import lister
-from cliff import show
-from openstackclient.common import exceptions as exc
-from openstackclient.common import utils
-from openstackclient.i18n import _
-from oslo_serialization import jsonutils
 
 from heatclient.common import format_utils
 from heatclient.common import utils as heat_utils
 from heatclient import exc as heat_exc
 
 
-class ResourceShow(show.ShowOne):
+class ResourceShow(command.ShowOne):
     """Display stack resource."""
 
     log = logging.getLogger(__name__ + '.ResourceShowStack')
@@ -73,10 +71,14 @@ class ResourceShow(show.ShowOne):
         return self.dict2columns(resource.to_dict())
 
 
-class ResourceList(lister.Lister):
+class ResourceList(command.Lister):
     """List stack resources."""
 
     log = logging.getLogger(__name__ + '.ResourceListStack')
+
+    @property
+    def formatter_namespace(self):
+        return 'heatclient.resource.formatter.list'
 
     def get_parser(self, prog_name):
         parser = super(ResourceList, self).get_parser(prog_name)
@@ -104,7 +106,7 @@ class ResourceList(lister.Lister):
             action='append',
             help=_('Filter parameters to apply on returned resources based on '
                    'their name, status, type, action, id and '
-                   'physcial_resource_id')
+                   'physical_resource_id')
         )
 
         return parser
@@ -125,6 +127,9 @@ class ResourceList(lister.Lister):
         except heat_exc.HTTPNotFound:
             msg = _('Stack not found: %s') % parsed_args.stack
             raise exc.CommandError(msg)
+
+        if parsed_args.formatter == 'dot':
+            return [], resources
 
         columns = ['physical_resource_id', 'resource_type', 'resource_status',
                    'updated_time']

@@ -17,7 +17,6 @@ import time
 
 from heatclient.common import utils
 import heatclient.exc as exc
-
 from heatclient.openstack.common._i18n import _
 
 
@@ -31,6 +30,10 @@ def get_hook_events(hc, stack_id, event_args, nested_depth=0,
         stack_action_reason = 'Stack UPDATE started'
         hook_event_reason = 'UPDATE paused until Hook pre-update is cleared'
         hook_clear_event_reason = 'Hook pre-update is cleared'
+    elif hook_type == 'pre-delete':
+        stack_action_reason = 'Stack DELETE started'
+        hook_event_reason = 'DELETE paused until Hook pre-delete is cleared'
+        hook_clear_event_reason = 'Hook pre-delete is cleared'
     else:
         raise exc.CommandError(_('Unexpected hook type %s') % hook_type)
 
@@ -63,29 +66,57 @@ def get_hook_events(hc, stack_id, event_args, nested_depth=0,
 
 def get_events(hc, stack_id, event_args, nested_depth=0,
                marker=None, limit=None):
+    event_args = dict(event_args)
+    if marker:
+        event_args['marker'] = marker
+    if limit:
+        event_args['limit'] = limit
+    if not nested_depth:
+        # simple call with no nested_depth
+        return _get_stack_events(hc, stack_id, event_args)
+
+    # assume an API which supports nested_depth
+    event_args['nested_depth'] = nested_depth
     events = _get_stack_events(hc, stack_id, event_args)
-    if nested_depth > 0:
-        events.extend(_get_nested_events(hc, nested_depth,
-                                         stack_id, event_args))
-        # Because there have been multiple stacks events mangled into
-        # one list, we need to sort before passing to print_list
-        # Note we can't use the prettytable sortby_index here, because
-        # the "start" option doesn't allow post-sort slicing, which
-        # will be needed to make "--marker" work for nested_depth lists
-        events.sort(key=lambda x: x.event_time)
 
-        # Slice the list if marker is specified
-        if marker:
-            try:
-                marker_index = [e.id for e in events].index(marker)
-                events = events[marker_index:]
-            except ValueError:
-                pass
+    if not events:
+        return events
 
-        # Slice the list if limit is specified
-        if limit:
-            limit_index = min(int(limit), len(events))
-            events = events[:limit_index]
+    first_links = getattr(events[0], 'links', [])
+    root_stack_link = [l for l in first_links
+                       if l.get('rel') == 'root_stack']
+    if root_stack_link:
+        # response has a root_stack link, indicating this is an API which
+        # supports nested_depth
+        return events
+
+    # API doesn't support nested_depth, do client-side paging and recursive
+    # event fetch
+    marker = event_args.pop('marker', None)
+    limit = event_args.pop('limit', None)
+    event_args.pop('nested_depth', None)
+    events = _get_stack_events(hc, stack_id, event_args)
+    events.extend(_get_nested_events(hc, nested_depth,
+                                     stack_id, event_args))
+    # Because there have been multiple stacks events mangled into
+    # one list, we need to sort before passing to print_list
+    # Note we can't use the prettytable sortby_index here, because
+    # the "start" option doesn't allow post-sort slicing, which
+    # will be needed to make "--marker" work for nested_depth lists
+    events.sort(key=lambda x: x.event_time)
+
+    # Slice the list if marker is specified
+    if marker:
+        try:
+            marker_index = [e.id for e in events].index(marker)
+            events = events[marker_index:]
+        except ValueError:
+            pass
+
+    # Slice the list if limit is specified
+    if limit:
+        limit_index = min(int(limit), len(events))
+        events = events[:limit_index]
     return events
 
 
@@ -135,7 +166,7 @@ def _get_stack_events(hc, stack_id, event_args):
 
 
 def poll_for_events(hc, stack_name, action=None, poll_period=5, marker=None,
-                    out=None):
+                    out=None, nested_depth=0):
     """Continuously poll events and logs for performed action on stack."""
 
     if action:
@@ -149,7 +180,7 @@ def poll_for_events(hc, stack_name, action=None, poll_period=5, marker=None,
     if not out:
         out = sys.stdout
     while True:
-        events = get_events(hc, stack_id=stack_name,
+        events = get_events(hc, stack_id=stack_name, nested_depth=nested_depth,
                             event_args={'sort_dir': 'asc',
                                         'marker': marker})
 
