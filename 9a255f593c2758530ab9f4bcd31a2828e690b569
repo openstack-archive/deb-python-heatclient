@@ -1,0 +1,9 @@
+Code-Review+2: Kanagaraj Manickam <mkr1481@gmail.com>
+Code-Review+2: Sergey Kraynev <skraynev@mirantis.com>
+Workflow+1: Sergey Kraynev <skraynev@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 26 Sep 2016 08:34:20 +0000
+Reviewed-on: https://review.openstack.org/376134
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
