@@ -70,8 +70,8 @@ Build-Depends-Indep: lsb-release,
                      subunit,
                      testrepository,
 Standards-Version: 3.9.8
-Vcs-Browser: https://git.openstack.org/cgit/openstack/deb-python-heatclient
-Vcs-Git: https://git.openstack.org/openstack/deb-python-heatclient
+Vcs-Browser: https://git.openstack.org/cgit/openstack/deb-python-heatclient?h=debian%2Fnewton
+Vcs-Git: https://git.openstack.org/openstack/deb-python-heatclient -b debian/newton
 Homepage: https://github.com/openstack/python-heatclient
 
 Package: python-heatclient
