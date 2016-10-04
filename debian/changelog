@@ -6,6 +6,9 @@ python-heatclient (1.4.0-2) unstable; urgency=medium
 
   [ Thomas Goirand ]
   * Uploading to unstable.
+  * Using pkgos-dh_auto_{test,install} from openstack-pkg-tools >= 52~.
+  * Blacklist non-deterministic test (Closes: #835355):
+    - ShellEnvironmentTest.test_process_multiple_environments_and_files_tracker
   * Fixed oslotest EPOCH.
 
  -- Ondřej Nový <onovy@debian.org>  Mon, 26 Sep 2016 19:10:18 +0200
