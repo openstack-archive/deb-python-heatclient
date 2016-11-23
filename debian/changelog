@@ -1,3 +1,9 @@
+python-heatclient (1.4.0-3) UNRELEASED; urgency=medium
+
+  * Bumped debhelper compat version to 10
+
+ -- Ondřej Nový <onovy@debian.org>  Thu, 24 Nov 2016 00:06:32 +0100
+
 python-heatclient (1.4.0-2) unstable; urgency=medium
 
   [ Ondřej Nový ]
