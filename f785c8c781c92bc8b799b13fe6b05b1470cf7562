@@ -1,0 +1,11 @@
+Code-Review+1: pawnesh kumar <pawnesh.kumar@nectechnologies.in>
+Code-Review+1: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Sergey Kraynev <skraynev@mirantis.com>
+Code-Review+2: Zane Bitter <zbitter@redhat.com>
+Workflow+1: Zane Bitter <zbitter@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 22 Nov 2016 23:07:26 +0000
+Reviewed-on: https://review.openstack.org/395535
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
