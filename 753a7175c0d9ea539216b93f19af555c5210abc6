@@ -1,0 +1,10 @@
+Code-Review+2: Sergey Kraynev <skraynev@mirantis.com>
+Code-Review+1: shizhihui <zhihui.shi@easystack.cn>
+Workflow+1: Steve Baker <sbaker@redhat.com>
+Code-Review+2: Steve Baker <sbaker@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 06 Dec 2016 00:39:09 +0000
+Reviewed-on: https://review.openstack.org/406050
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
