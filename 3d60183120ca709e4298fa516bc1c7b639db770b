@@ -1,0 +1,9 @@
+Code-Review+2: Steven Hardy <shardy@redhat.com>
+Code-Review+2: huangtianhua <huangtianhua@huawei.com>
+Workflow+1: huangtianhua <huangtianhua@huawei.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 13 Dec 2016 08:42:39 +0000
+Reviewed-on: https://review.openstack.org/408458
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
