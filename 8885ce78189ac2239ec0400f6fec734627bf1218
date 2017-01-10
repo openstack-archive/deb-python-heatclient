@@ -1,0 +1,11 @@
+Code-Review+2: Sergey Kraynev <skraynev@mirantis.com>
+Code-Review+1: Shu Yingya <yingya.shu@easystack.cn>
+Code-Review+1: ChangBo Guo(gcb) <glongwave@gmail.com>
+Code-Review+2: Ethan Lynn <xuanlangjian@gmail.com>
+Workflow+1: Ethan Lynn <xuanlangjian@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 10 Jan 2017 09:36:18 +0000
+Reviewed-on: https://review.openstack.org/392462
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
