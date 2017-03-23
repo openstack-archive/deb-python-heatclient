@@ -1,0 +1,9 @@
+Code-Review+2: Sergey Kraynev <sergejyit@gmail.com>
+Code-Review+2: Rabi Mishra <ramishra@redhat.com>
+Workflow+1: Rabi Mishra <ramishra@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 03 Mar 2017 05:00:56 +0000
+Reviewed-on: https://review.openstack.org/440141
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master

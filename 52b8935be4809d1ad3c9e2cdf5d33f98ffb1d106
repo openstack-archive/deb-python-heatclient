@@ -1,0 +1,9 @@
+Code-Review+2: huangtianhua <huangtianhua@huawei.com>
+Code-Review+2: Rico Lin <rico.lin.guanyu@gmail.com>
+Workflow+1: Rico Lin <rico.lin.guanyu@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 14 Mar 2017 08:44:58 +0000
+Reviewed-on: https://review.openstack.org/409078
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
