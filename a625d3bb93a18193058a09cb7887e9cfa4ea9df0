@@ -1,0 +1,10 @@
+Code-Review+2: Sergey Kraynev <sergejyit@gmail.com>
+Code-Review+1: Zane Bitter <zbitter@redhat.com>
+Code-Review+2: Rico Lin <rico.lin@easystack.cn>
+Workflow+1: Rico Lin <rico.lin@easystack.cn>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 05 Jun 2017 05:34:39 +0000
+Reviewed-on: https://review.openstack.org/463510
+Project: openstack/deb-python-heatclient
+Branch: refs/heads/master
