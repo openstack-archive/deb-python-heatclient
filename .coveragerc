@@ -1,8 +1,0 @@
-[run]
-branch = True
-source = heatclient
-omit = heatclient/tests/*
-
-[report]
-ignore_errors = True
-precision = 2
